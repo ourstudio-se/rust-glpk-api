@@ -4,11 +4,14 @@ use libc;
 use libc::c_int;
 use std::collections::HashMap;
 use actix_web::{web, App, HttpServer, Responder, HttpResponse};
+use actix_web::middleware::Logger;
 use serde::{Deserialize, Serialize};
+use std::env;
+use dotenv::dotenv;
 
 type Bound = (i32, i32);
 type ID = String;
-type Objective = HashMap<ID, i32>;
+type Objective = HashMap<ID, f64>;
 type Interpretation = HashMap<ID, i64>;
 
 // 1    GLP_FR      Free variable (−∞ < x < ∞) 
@@ -48,31 +51,71 @@ enum Status {
     EmptySpace = 9,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Variable {
     id: ID,
     bound: Bound,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+struct Shape {
+    nrows: usize,
+    ncols: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct IntegerSparseMatrix {
     rows: Vec<i32>,
     cols: Vec<i32>,
     vals: Vec<i32>,
+    shape: Shape,
 }
 
 #[derive(Serialize, Deserialize)]
-struct SparseIntegerPolyhedron {
+struct SparseLEIntegerPolyhedron {
     A: IntegerSparseMatrix,
     b: Vec<Bound>,
     variables: Vec<Variable>,
+    double_bound: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct UpperBoundSparseGEIntegerPolyhedron {
+    A: IntegerSparseMatrix,
+    b: Vec<i32>,
+    variables: Vec<Variable>,
+}
+
+impl From<UpperBoundSparseGEIntegerPolyhedron> for SparseLEIntegerPolyhedron {
+    fn from(simple: UpperBoundSparseGEIntegerPolyhedron) -> Self {
+        // Flip from GE to LE by negating the values in A and b
+        SparseLEIntegerPolyhedron {
+            A: IntegerSparseMatrix {
+                rows: simple.A.rows,
+                cols: simple.A.cols,
+                vals: simple.A.vals.iter().map(|v| -*v).collect(),
+                shape: simple.A.shape,
+            },
+            b: simple.b.into_iter().map(|v| (0, -v)).collect(),
+            variables: simple.variables,
+            double_bound: false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Model {
+    polyhedron: UpperBoundSparseGEIntegerPolyhedron,
+    columns: Vec<String>,
+    intvars: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Solution {
     status: Status,
     objective: i32,
-    interpretation: Interpretation,
+    solution: Interpretation,
+    error: Option<String>,
 }
 
 /// Solves a set of integer linear programming (ILP) problems defined by the given polytope and objectives.
@@ -108,8 +151,9 @@ struct Solution {
 ///     println!("{:?}", solution);
 /// }
 /// ``
-fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, maximize: bool, term_out: bool) -> Vec<Solution> {
+fn solve_ilps(polytope: &mut SparseLEIntegerPolyhedron, objectives: Vec<Objective>, maximize: bool, term_out: bool) -> Vec<Solution> {
 
+    // Initialize an empty vector to store solutions
     let mut solutions: Vec<Solution> = Vec::new();
 
     // Check if rows, columns and values are the same lenght. Else panic
@@ -120,7 +164,7 @@ fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, ma
     // If the polytope is empty, return an empty space status solution
     if polytope.A.rows.is_empty() || polytope.A.cols.is_empty() {
         for _ in 0..objectives.len() {
-            solutions.push(Solution { status: Status::EmptySpace, objective: 0, interpretation: Interpretation::new() });
+            solutions.push(Solution { status: Status::EmptySpace, objective: 0, solution: Interpretation::new(), error: None });
         }
         return solutions;
     }
@@ -149,7 +193,8 @@ fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, ma
         // Add constraints (rows)
         glpk::glp_add_rows(lp, polytope.b.len() as i32);
         for (i, &b) in polytope.b.iter().enumerate() {
-            glpk::glp_set_row_bnds(lp, (i + 1) as i32, 3, b.0 as f64, b.1 as f64);
+            let double_bound = if polytope.double_bound { 4 } else { 3 };
+            glpk::glp_set_row_bnds(lp, (i + 1) as i32, double_bound, b.0 as f64, b.1 as f64);
         }
 
         // Add variables
@@ -192,26 +237,15 @@ fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, ma
         for obj in objectives.iter() {
 
             // Setup empty solution
-            let mut solution = Solution { status: Status::Undefined, objective: 0, interpretation: Interpretation::new() };
+            let mut solution = Solution { status: Status::Undefined, objective: 0, solution: Interpretation::new(), error: None };
 
             // Update the objective function
             for (j, v) in polytope.variables.iter().enumerate() {
-                let coef = obj.get(&v.id).unwrap_or(&0);
+                let coef = obj.get(&v.id).unwrap_or(&0.0);
                 glpk::glp_set_obj_coef(lp, (j + 1) as i32, *coef as f64);
             }
 
-            // Solve the LP relaxation with warm start
-            let mut simplex_params = glpk::glp_smcp::default();
-            glpk::glp_init_smcp(&mut simplex_params);
-            simplex_params.presolve = 0;
-            simplex_params.msg_lev = 1;
-            let simplex_ret = glpk::glp_simplex(lp, &mut simplex_params);
-            if simplex_ret != 0 {
-                solution.status = Status::SimplexFailed;
-                continue;
-            }
-
-            // **Now solve the integer problem**
+            // Solve the integer problem using presolving
             let mut mip_params = glpk::glp_iocp::default();
             glpk::glp_init_iocp(&mut mip_params);
             mip_params.presolve = 1; 
@@ -219,36 +253,44 @@ fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, ma
 
             if mip_ret != 0 {
                 solution.status = Status::MIPFailed;
+                solution.error = Some(format!("GLPK MIP solver failed with code: {}", mip_ret));
+                solutions.push(solution);
                 continue;
             }
 
             let status = glpk::glp_mip_status(lp);
             match status {
-                1 => solution.status = Status::Undefined,
+                1 => {
+                    solution.status = Status::Undefined;
+                    solution.error = Some("Solution is undefined".to_string());
+                },
                 2 => {
                     solution.status = Status::Feasible;
                     solution.objective = glpk::glp_mip_obj_val(lp) as i32;
                     for (j, var) in polytope.variables.iter().enumerate() {
                         let x = glpk::glp_mip_col_val(lp, (j + 1) as i32);
-                        solution.interpretation.insert(var.id.clone(), x as i64);
+                        solution.solution.insert(var.id.clone(), x as i64);
                     }
                 },
                 3 => {
                     solution.status = Status::Infeasible;
+                    solution.error = Some("Infeasible solution exists".to_string());
                 }
                 4 => {
                     solution.status = Status::NoFeasible;
+                    solution.error = Some("No feasible solution exists".to_string());
                 }
                 5 => {
                     solution.status = Status::Optimal;
                     solution.objective = glpk::glp_mip_obj_val(lp) as i32;
                     for (j, var) in polytope.variables.iter().enumerate() {
                         let x = glpk::glp_mip_col_val(lp, (j + 1) as i32);
-                        solution.interpretation.insert(var.id.clone(), x as i64);
+                        solution.solution.insert(var.id.clone(), x as i64);
                     }
                 },
                 6 => {
                     solution.status = Status::Unbounded;
+                    solution.error = Some("Problem is unbounded".to_string());
                 },
                 x => {
                     panic!("Unknown status when solving ({})", x);
@@ -264,23 +306,29 @@ fn solve_ilps(polytope: &SparseIntegerPolyhedron, objectives: Vec<Objective>, ma
     }
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+enum SolverDirection {
+    maximize,
+    minimize,
+}
+
 #[derive(Deserialize)]
 struct SolveRequest {
-    polytope: SparseIntegerPolyhedron,
+    model: Model,
     objectives: Vec<Objective>,
-    maximize: bool,
-    term_out: bool,
+    direction: SolverDirection,
+    solver: Option<String>,
 }
 
 /// POST /solve
 async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
     let solutions = solve_ilps(
-        &req.polytope,
+        &mut req.model.polyhedron.clone().into(),
         req.objectives.clone(),
-        req.maximize,
-        req.term_out,
+        req.direction == SolverDirection::maximize,
+        false,
     );
-    HttpResponse::Ok().json(solutions)
+    HttpResponse::Ok().json(serde_json::json!({ "solutions": solutions }))
 }
 
 /// GET /health
@@ -290,13 +338,29 @@ async fn health_check() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("Starting server on http://127.0.0.1:8080");
+    dotenv().ok();
+    let port = env::var("PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(9000);
+
+    // env_logger::init_from_env(Env::default().default_filter_or("debug"));
+
+    println!("Starting server on http://127.0.0.1:{}", port);
     HttpServer::new(|| {
         App::new()
-            .route("/solve", web::post().to(solve))
+            .wrap(Logger::default())
+            .app_data(web::JsonConfig::default().error_handler(|err, _| {
+                let err_string = err.to_string();
+                actix_web::error::InternalError::from_response(
+                    err,
+                    HttpResponse::BadRequest().json(serde_json::json!({ "error": err_string }))
+                ).into()
+            }))
+            .route("/model/solve-one/linear", web::post().to(solve))
             .route("/health", web::get().to(health_check))
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }
