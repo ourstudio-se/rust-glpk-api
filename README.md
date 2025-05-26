@@ -3,7 +3,7 @@
 When you're ready, start your application by running:
 `docker compose up --build`.
 
-Your application will be available at http://localhost:8080.
+Your application will be available at http://localhost:9000 by default.
 
 ### Deploying your application to the cloud
 
@@ -23,51 +23,58 @@ docs for more detail on building and pushing.
 
 ### Example
 ```
-curl -X POST http://127.0.0.1:8080/solve \
+curl -X POST http://127.0.0.1:9000/model/solve-one/linear \
   -H "Content-Type: application/json" \
   -d '{
-    "polytope": {
+  "model": {
+    "polyhedron": {
       "A": {
         "rows": [0,0,1,1,2,2],
         "cols": [0,1,0,2,1,2],
-        "vals": [1,1,1,1,1,1]
+        "vals": [1,1,1,1,1,1],
+        "shape": [3,3]
       },
-      "b": [[0,1], [0,1], [0,1]],
+      "b": [1, 1, 1],
       "variables": [
         { "id": "x1", "bound": [0,1] },
         { "id": "x2", "bound": [0,1] },
         { "id": "x3", "bound": [0,1] }
       ]
     },
-    "objectives": [
-      { "x1":0, "x2":0, "x3":1 },
-      { "x1":1, "x2":2, "x3":1 },
-      { "x1":1, "x2":1, "x3":2 }
-    ],
-    "maximize": true,
-    "term_out": false
-  }'
+    "columns": [],
+    "intvars": []
+  },
+  "objectives": [
+    { "x1":0, "x2":0, "x3":1 },
+    { "x1":1, "x2":2, "x3":1 }
+  ],
+  "direction": "maximize"
+}'
 ```
 Returns one solution for each objective:
 ```json
-[
-	{
-		"status": "Optimal",
-		"objective": 1,
-		"interpretation": {
-			"x1": 0,
-			"x2": 0,
-			"x3": 1
+{
+	"solutions": [
+		{
+			"error": null,
+			"objective": 1,
+			"solution": {
+				"x1": 1,
+				"x2": 1,
+				"x3": 1
+			},
+			"status": "Optimal"
+		},
+		{
+			"error": null,
+			"objective": 4,
+			"solution": {
+				"x1": 1,
+				"x2": 1,
+				"x3": 1
+			},
+			"status": "Optimal"
 		}
-	},
-	{
-		"status": "Optimal",
-		"objective": 2,
-		"interpretation": {
-			"x1": 0,
-			"x3": 0,
-			"x2": 1
-		}
-	}
-]
+	]
+}
 ```
