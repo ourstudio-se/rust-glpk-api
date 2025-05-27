@@ -344,19 +344,28 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(9000);
 
+    let json_limit = env::var("JSON_PAYLOAD_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(2 * 1024 * 1024); // default 2 MB
+
     // env_logger::init_from_env(Env::default().default_filter_or("debug"));
 
     println!("Starting server on http://127.0.0.1:{}", port);
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .app_data(web::JsonConfig::default().error_handler(|err, _| {
-                let err_string = err.to_string();
-                actix_web::error::InternalError::from_response(
-                    err,
-                    HttpResponse::BadRequest().json(serde_json::json!({ "error": err_string }))
-                ).into()
-            }))
+            .app_data(
+                web::JsonConfig::default()
+                    .limit(json_limit) // ⬅️ use env-configured limit
+                    .error_handler(|err, _| {
+                        let err_string = err.to_string();
+                        actix_web::error::InternalError::from_response(
+                            err,
+                            HttpResponse::BadRequest().json(serde_json::json!({ "error": err_string }))
+                        ).into()
+                    })
+            )
             .route("/model/solve-one/linear", web::post().to(solve))
             .route("/health", web::get().to(health_check))
     })
