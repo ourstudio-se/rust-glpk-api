@@ -40,9 +40,7 @@ curl -X POST http://127.0.0.1:9000/model/solve-one/linear \
         { "id": "x2", "bound": [0,1] },
         { "id": "x3", "bound": [0,1] }
       ]
-    },
-    "columns": [],
-    "intvars": []
+    }
   },
   "objectives": [
     { "x1":0, "x2":0, "x3":1 },
