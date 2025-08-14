@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLPK Rust API Documentation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .endpoint {
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .method {
+            background: #2ecc71;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .method.post {
+            background: #e74c3c;
+        }
+        .method.get {
+            background: #2ecc71;
+        }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        code {
+            background: #ecf0f1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        .example {
+            margin: 15px 0;
+        }
+        .response {
+            background: #e8f5e8;
+            border-left: 4px solid #27ae60;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #fdf2f2;
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: #3498db;
+            color: white;
+        }
+        .try-it {
+            background: #3498db;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .try-it:hover {
+            background: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔢 GLPK Rust API Documentation</h1>
+        <p>This API provides linear programming problem solving using the GLPK (GNU Linear Programming Kit) library.</p>
+        
+        <h2>📡 Base URL</h2>
+        <p><code>http://localhost:9000</code> (default port)</p>
+
+        <h2>🚀 Endpoints</h2>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /health</h3>
+            <p>Health check endpoint to verify the API is running.</p>
+            
+            <div class="example">
+                <h4>Example Request:</h4>
+                <pre>curl http://localhost:9000/health</pre>
+            </div>
+            
+            <div class="response">
+                <h4>Success Response (200):</h4>
+                <pre>OK</pre>
+            </div>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /solve</h3>
+            <p>Solve a linear programming problem with one or more objectives.</p>
+            
+            <h4>Request Body Structure:</h4>
+            <table>
+                <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td>polyhedron</td>
+                    <td>Object</td>
+                    <td>Constraint matrix and bounds</td>
+                </tr>
+                <tr>
+                    <td>objectives</td>
+                    <td>Array</td>
+                    <td>List of objective functions to optimize</td>
+                </tr>
+                <tr>
+                    <td>direction</td>
+                    <td>String</td>
+                    <td>"maximize" or "minimize"</td>
+                </tr>
+            </table>
+
+            <h4>Polyhedron Structure:</h4>
+            <table>
+                <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td>A</td>
+                    <td>Object</td>
+                    <td>Sparse constraint matrix</td>
+                </tr>
+                <tr>
+                    <td>b</td>
+                    <td>Array</td>
+                    <td>Right-hand side values</td>
+                </tr>
+                <tr>
+                    <td>variables</td>
+                    <td>Array</td>
+                    <td>Variable definitions with bounds</td>
+                </tr>
+            </table>
+
+            <div class="example">
+                <h4>Example Request:</h4>
+                <pre>curl -X POST http://localhost:9000/solve \
+  -H "Content-Type: application/json" \
+  -d '{
+  "polyhedron": {
+    "A": {
+      "rows": [0, 0, 1, 1, 2, 2],
+      "cols": [0, 1, 0, 2, 1, 2],
+      "vals": [1, 1, 1, 1, 1, 1],
+      "shape": {"nrows": 3, "ncols": 3}
+    },
+    "b": [1, 1, 1],
+    "variables": [
+      {"id": "x1", "bound": [0, 1]},
+      {"id": "x2", "bound": [0, 1]},
+      {"id": "x3", "bound": [0, 1]}
+    ]
+  },
+  "objectives": [
+    {"x1": 0, "x2": 0, "x3": 1},
+    {"x1": 1, "x2": 2, "x3": 1}
+  ],
+  "direction": "maximize"
+}'</pre>
+            </div>
+            
+            <div class="response">
+                <h4>Success Response (200):</h4>
+                <pre>{
+  "solutions": [
+    {
+      "status": 5,
+      "objective": 1,
+      "solution": {
+        "x1": 0,
+        "x2": 0,
+        "x3": 1
+      },
+      "error": null
+    },
+    {
+      "status": 5,
+      "objective": 3,
+      "solution": {
+        "x1": 0,
+        "x2": 1,
+        "x3": 1
+      },
+      "error": null
+    }
+  ]
+}</pre>
+            </div>
+
+            <div class="error">
+                <h4>Error Response (400):</h4>
+                <pre>{
+  "error": "Invalid JSON format or missing required fields"
+}</pre>
+            </div>
+        </div>
+
+        <h2>📊 Status Codes</h2>
+        <table>
+            <tr>
+                <th>Code</th>
+                <th>Status</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>1</td>
+                <td>Undefined</td>
+                <td>Solution status is undefined</td>
+            </tr>
+            <tr>
+                <td>2</td>
+                <td>Feasible</td>
+                <td>Solution is feasible</td>
+            </tr>
+            <tr>
+                <td>3</td>
+                <td>Infeasible</td>
+                <td>Problem is infeasible</td>
+            </tr>
+            <tr>
+                <td>4</td>
+                <td>NoFeasible</td>
+                <td>No feasible solution exists</td>
+            </tr>
+            <tr>
+                <td>5</td>
+                <td>Optimal</td>
+                <td>Optimal solution found</td>
+            </tr>
+            <tr>
+                <td>6</td>
+                <td>Unbounded</td>
+                <td>Problem is unbounded</td>
+            </tr>
+            <tr>
+                <td>7</td>
+                <td>SimplexFailed</td>
+                <td>Simplex method failed</td>
+            </tr>
+            <tr>
+                <td>8</td>
+                <td>MIPFailed</td>
+                <td>Mixed-integer programming failed</td>
+            </tr>
+            <tr>
+                <td>9</td>
+                <td>EmptySpace</td>
+                <td>Search space is empty</td>
+            </tr>
+        </table>
+
+        <h2>🔧 Matrix Format</h2>
+        <p>The constraint matrix uses <strong>sparse format</strong> with separate arrays for:</p>
+        <ul>
+            <li><code>rows</code>: Row indices (0-based)</li>
+            <li><code>cols</code>: Column indices (0-based)</li>
+            <li><code>vals</code>: Values at those positions</li>
+            <li><code>shape</code>: Matrix dimensions {nrows, ncols}</li>
+        </ul>
+
+        <h2>📝 Notes</h2>
+        <ul>
+            <li>The API converts GE constraints (A x ≥ b) to LE constraints (A x ≤ b) internally</li>
+            <li>Variable bounds are specified as [lower_bound, upper_bound]</li>
+            <li>Objective functions can reference any subset of variables</li>
+            <li>Unknown variables in objectives are silently ignored</li>
+            <li>Multiple objectives are solved independently</li>
+        </ul>
+
+        <h2>🌐 Environment Variables</h2>
+        <table>
+            <tr>
+                <th>Variable</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>PORT</td>
+                <td>9000</td>
+                <td>Server port number</td>
+            </tr>
+            <tr>
+                <td>JSON_PAYLOAD_LIMIT</td>
+                <td>2MB</td>
+                <td>Maximum JSON request size</td>
+            </tr>
+        </table>
+
+        <button class="try-it" onclick="testHealthEndpoint()">🔍 Test Health Endpoint</button>
+        <div id="health-result"></div>
+
+        <script>
+            async function testHealthEndpoint() {
+                const resultDiv = document.getElementById('health-result');
+                resultDiv.innerHTML = 'Testing...';
+                
+                try {
+                    const response = await fetch('/health');
+                    const text = await response.text();
+                    const status = response.status;
+                    
+                    resultDiv.innerHTML = `
+                        <div class="response">
+                            <strong>Status:</strong> ${status}<br>
+                            <strong>Response:</strong> ${text}
+                        </div>
+                    `;
+                } catch (error) {
+                    resultDiv.innerHTML = `
+                        <div class="error">
+                            <strong>Error:</strong> ${error.message}
+                        </div>
+                    `;
+                }
+            }
+        </script>
+    </div>
+</body>
+</html>
