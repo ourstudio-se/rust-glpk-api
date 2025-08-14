@@ -90,6 +90,20 @@ Returns one solution for each objective:
 }
 ```
 
+## 🧮 Problem Formulation
+
+The API is designed to solve integer linear programming problems in the standard idiomatic form:
+
+**maximize** (or minimize) **w @ x** subject to **A @ x ≤ b**
+
+Where:
+- `w` is the objective coefficient vector (specified in the `objectives` field)
+- `x` is the decision variable vector (defined in the `variables` field)
+- `A` is the constraint coefficient matrix (specified in the `polyhedron.A` field)
+- `b` is the constraint right-hand side vector (specified in the `polyhedron.b` field)
+
+This standard formulation allows you to express a wide variety of optimization problems by properly setting up the constraint matrix and objective coefficients.
+
 ## 📊 Request Structure
 
 ### Root Fields
