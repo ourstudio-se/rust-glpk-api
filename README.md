@@ -1,48 +1,55 @@
-### Building and running your application
+# GLPK Rust API
 
-When you're ready, start your application by running:
-`docker compose up --build`.
+A simple REST API for solving linear programming problems using the GLPK (GNU Linear Programming Kit) library.
 
-Your application will be available at http://localhost:9000 by default.
+## 🚀 Quick Start
 
-### Deploying your application to the cloud
+### Running Locally
 
-First, build your image, e.g.: `docker build -t myapp .`.
-If your cloud uses a different CPU architecture than your development
-machine (e.g., you are on a Mac M1 and your cloud provider is amd64),
-you'll want to build the image for that platform, e.g.:
-`docker build --platform=linux/amd64 -t myapp .`.
-
-Then, push it to your registry, e.g. `docker push myregistry.com/myapp`.
-
-Consult Docker's [getting started](https://docs.docker.com/go/get-started-sharing/)
-docs for more detail on building and pushing.
-
-### References
-* [Docker's Rust guide](https://docs.docker.com/language/rust/)
-
-### Example
+```bash
+cargo run
 ```
-curl -X POST http://127.0.0.1:9000/model/solve-one/linear \
+
+Your application will be available at http://localhost:9000.
+
+### Using Docker
+
+```bash
+docker compose up --build
+```
+
+## 📚 API Documentation
+
+Visit `http://localhost:9000/docs` for interactive API documentation, or simply go to `http://localhost:9000` (automatically redirects to docs).
+
+## 🔗 Endpoints
+
+- `GET /` - Redirects to documentation
+- `GET /docs` - Interactive API documentation  
+- `GET /health` - Health check
+- `POST /solve` - Solve linear programming problems
+
+## 📝 Usage Example
+
+### Simple Linear Programming Problem
+
+```bash
+curl -X POST http://127.0.0.1:9000/solve \
   -H "Content-Type: application/json" \
   -d '{
-  "model": {
-    "polyhedron": {
-      "A": {
-        "rows": [0,0,1,1,2,2],
-        "cols": [0,1,0,2,1,2],
-        "vals": [1,1,1,1,1,1],
-        "shape": [3,3]
-      },
-      "b": [1, 1, 1],
-      "variables": [
-        { "id": "x1", "bound": [0,1] },
-        { "id": "x2", "bound": [0,1] },
-        { "id": "x3", "bound": [0,1] }
-      ]
+  "polyhedron": {
+    "A": {
+      "rows": [0,0,1,1,2,2],
+      "cols": [0,1,0,2,1,2],
+      "vals": [1,1,1,1,1,1],
+      "shape": {"nrows": 3, "ncols": 3}
     },
-    "columns": [],
-    "intvars": []
+    "b": [1, 1, 1],
+    "variables": [
+      { "id": "x1", "bound": [0,1] },
+      { "id": "x2", "bound": [0,1] },
+      { "id": "x3", "bound": [0,1] }
+    ]
   },
   "objectives": [
     { "x1":0, "x2":0, "x3":1 },
@@ -51,30 +58,136 @@ curl -X POST http://127.0.0.1:9000/model/solve-one/linear \
   "direction": "maximize"
 }'
 ```
+
+### Response
+
 Returns one solution for each objective:
+
 ```json
 {
-	"solutions": [
-		{
-			"error": null,
-			"objective": 1,
-			"solution": {
-				"x1": 1,
-				"x2": 1,
-				"x3": 1
-			},
-			"status": "Optimal"
-		},
-		{
-			"error": null,
-			"objective": 4,
-			"solution": {
-				"x1": 1,
-				"x2": 1,
-				"x3": 1
-			},
-			"status": "Optimal"
-		}
-	]
+    "solutions": [
+        {
+            "error": null,
+            "objective": 1,
+            "solution": {
+                "x1": 1,
+                "x2": 1,
+                "x3": 1
+            },
+            "status": "Optimal"
+        },
+        {
+            "error": null,
+            "objective": 4,
+            "solution": {
+                "x1": 1,
+                "x2": 1,
+                "x3": 1
+            },
+            "status": "Optimal"
+        }
+    ]
 }
 ```
+
+## 📊 Request Structure
+
+### Root Fields
+- `polyhedron` - Constraint matrix and variable definitions
+- `objectives` - Array of objective functions to optimize
+- `direction` - Either "maximize" or "minimize"
+
+### Polyhedron Structure
+- `A` - Sparse constraint matrix (rows, cols, vals, shape)
+- `b` - Right-hand side constraint values
+- `variables` - Array of variable definitions with bounds
+
+### Variable Structure
+- `id` - Variable name (string)
+- `bound` - [lower_bound, upper_bound] as integers
+
+## 📊 Status Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| 1 | Undefined | Solution status is undefined |
+| 2 | Feasible | Solution is feasible |
+| 3 | Infeasible | Problem is infeasible |
+| 4 | NoFeasible | No feasible solution exists |
+| 5 | Optimal | Optimal solution found |
+| 6 | Unbounded | Problem is unbounded |
+| 7 | SimplexFailed | Simplex method failed |
+| 8 | MIPFailed | Mixed-integer programming failed |
+| 9 | EmptySpace | Search space is empty |
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+- `PORT` - Server port (default: 9000)
+- `JSON_PAYLOAD_LIMIT` - Maximum request size (default: 2MB)
+
+### Using .env file
+
+Create a `.env` file in the project root:
+
+```
+PORT=8080
+JSON_PAYLOAD_LIMIT=5242880
+```
+
+## 🐳 Deploying with Docker
+
+### Build the image
+
+```bash
+docker build -t glpk-api .
+```
+
+### For different CPU architecture
+
+```bash
+docker build --platform=linux/amd64 -t glpk-api .
+```
+
+### Push to registry
+
+```bash
+docker push myregistry.com/glpk-api
+```
+
+## 🧪 Testing
+
+Run the integration tests:
+
+```bash
+cargo test
+```
+
+Or test manually with the included script:
+
+```bash
+./test.sh
+```
+
+## 🔧 Matrix Format
+
+The API uses **sparse matrix format** for efficiency:
+
+- `rows` - Array of row indices (0-based)
+- `cols` - Array of column indices (0-based)  
+- `vals` - Array of values at those positions
+- `shape` - Matrix dimensions `{"nrows": N, "ncols": M}`
+
+## 📋 Notes
+
+- The API converts GE constraints (A x ≥ b) to LE constraints internally
+- Variable bounds are specified as `[lower_bound, upper_bound]`
+- Multiple objectives are solved independently
+- Unknown variables in objectives are silently ignored
+
+## 🔗 References
+
+- [Docker's Rust guide](https://docs.docker.com/language/rust/)
+- [GLPK Documentation](https://www.gnu.org/software/glpk/)
+- [Linear Programming on Wikipedia](https://en.wikipedia.org/wiki/Linear_programming)
