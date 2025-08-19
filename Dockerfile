@@ -16,29 +16,21 @@ FROM rust:${RUST_VERSION}-alpine AS build
 ARG APP_NAME
 WORKDIR /app
 
-# Install host build dependencies.
 RUN apk add --no-cache clang lld musl-dev git curl make
-
-# Install the glpk library and its development files.
 RUN apk add --no-cache glpk-dev
 
-# Build the application.
-# Leverage a cache mount to /usr/local/cargo/registry/
-# for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
-# for git repository dependencies, and a cache mount to /app/target/ for
-# compiled dependencies which will speed up subsequent builds.
-# Leverage a bind mount to the src directory to avoid having to copy the
-# source code into the container. Once built, copy the executable to an
-# output directory before the cache mounted /app/target is unmounted.
+# Viktigt för att kunna använda ${TARGETPLATFORM} i RUN
+ARG TARGETPLATFORM
+
 RUN --mount=type=bind,source=src,target=src \
     --mount=type=bind,source=static,target=static \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=/app/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
-cargo build --locked --release && \
-cp ./target/release/$APP_NAME /bin/server
+    --mount=type=cache,id=cargo-target-${TARGETPLATFORM},target=/app/target/ \
+    --mount=type=cache,id=cargo-git-${TARGETPLATFORM},target=/usr/local/cargo/git/db \
+    --mount=type=cache,id=cargo-registry-${TARGETPLATFORM},target=/usr/local/cargo/registry/ \
+    cargo build --locked --release && \
+    cp ./target/release/$APP_NAME /bin/server
 
 ################################################################################
 # Create a new stage for running the application that contains the minimal
@@ -69,7 +61,7 @@ USER appuser
 COPY --from=build /bin/server /bin/
 
 # Expose the port that the application listens on.
-EXPOSE 8080
+EXPOSE 9000
 
 # What the container should run when it is started.
 CMD ["/bin/server"]

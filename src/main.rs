@@ -34,9 +34,9 @@ pub struct ApiIntegerSparseMatrix {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct UpperBoundSparseGEIntegerPolyhedron {
+pub struct SparseLEIntegerPolyhedron {
     A: ApiIntegerSparseMatrix,
-    b: Vec<i32>,              // GE right-hand side (we'll flip to LE)
+    b: Vec<i32>,              // LE right-hand side
     variables: Vec<ApiVariable>,
 }
 
@@ -51,7 +51,7 @@ type ObjectiveOwned = HashMap<String, f64>;
 
 #[derive(Deserialize)]
 pub struct SolveRequest {
-    polyhedron: UpperBoundSparseGEIntegerPolyhedron,
+    polyhedron: SparseLEIntegerPolyhedron,
     objectives: Vec<ObjectiveOwned>,
     direction: SolverDirection,
 }
@@ -106,21 +106,17 @@ fn api_matrix_to_glpk(m: &ApiIntegerSparseMatrix) -> GlpkMatrix {
     }
 }
 
-/// Convert an API GE polyhedron (A x >= b) to a GLPK LE polyhedron (A' x <= b')
-/// by negating A and b (A' = -A, b' = -b) and building borrowed variables.
-fn ge_to_glpk_le<'a>(
-    ge: &'a UpperBoundSparseGEIntegerPolyhedron,
+/// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.
+fn api_le_to_glpk_le<'a>(
+    le: &'a SparseLEIntegerPolyhedron,
     id_storage: &'a [String],
 ) -> GlpkPoly<'a> {
-    // Flip GE → LE: negate all A values and b
-    let mut glpk_A = api_matrix_to_glpk(&ge.A);
-    glpk_A.vals = glpk_A.vals.into_iter().map(|v| -v).collect();
-
-    let glpk_b: Vec<Bound> = ge.b.iter().map(|&v| (0, -v)).collect();
+    let glpk_a = api_matrix_to_glpk(&le.A);
+    let glpk_b: Vec<Bound> = le.b.iter().map(|&v| (0, v)).collect();
 
     // Borrowed variables from id_storage
-    // Ensure id_storage was created from ge.variables in the same order
-    let glpk_vars: Vec<GlpkVar<'a>> = ge
+    // Ensure id_storage was created from le.variables in the same order
+    let glpk_vars: Vec<GlpkVar<'a>> = le
         .variables
         .iter()
         .zip(id_storage.iter())
@@ -131,10 +127,10 @@ fn ge_to_glpk_le<'a>(
         .collect();
 
     GlpkPoly {
-        A: glpk_A,
+        A: glpk_a,
         b: glpk_b,
         variables: glpk_vars,
-        double_bound: false, // matches your previous conversion
+        double_bound: false,
     }
 }
 
@@ -157,7 +153,7 @@ pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
     }
 
     // Build a borrowed LE polyhedron for the solver
-    let glpk_polyhedron = ge_to_glpk_le(&req.polyhedron, &id_storage);
+    let glpk_polyhedron = api_le_to_glpk_le(&req.polyhedron, &id_storage);
     // Solver expects &mut
     let mut glpk_polyhedron = glpk_polyhedron;
 
