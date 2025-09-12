@@ -138,6 +138,11 @@ fn api_le_to_glpk_le<'a>(
 
 /// POST /solve
 pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
+    match validate_solve_request(&req) {
+        Ok(_) => (),
+        Err(response) => return response,
+    }
+
     // Keep owned IDs alive while GLPK borrows &str from them
     let id_storage: Vec<String> = req
         .polyhedron
@@ -192,6 +197,22 @@ pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
         .collect();
 
     HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
+}
+
+fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
+    let variable_count = req.polyhedron.variables.len();
+    let column_count = req.polyhedron.A.shape.ncols;
+    if variable_count != column_count {
+        return Err(HttpResponse::BadRequest().json(serde_json::json!({ "error": "Number of variables must match number of columns in A" })));
+    }
+
+    let b_count = req.polyhedron.b.len();
+    let row_count = req.polyhedron.A.shape.nrows;
+    if b_count != row_count {
+        return Err(HttpResponse::BadRequest().json(serde_json::json!({ "error": "Number of values in b must match number of rows in A" })));
+    }
+
+    Ok(())
 }
 
 /// GET /health
