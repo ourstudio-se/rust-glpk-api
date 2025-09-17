@@ -155,6 +155,15 @@ PORT=8080
 JSON_PAYLOAD_LIMIT=5242880
 ```
 
+### 🛡️ Protected mode
+
+Enable authentication for the `POST /solve` endpoint by setting the following variables in the enviroment:
+
+- `PROTECT=true` (default: `false`)
+- `API_TOKEN=****`
+
+When enabled, all requests to /solve must include a valid API key in a X-API-Key header.
+
 ## 🐳 Deploying with Docker
 
 ### Build the image
