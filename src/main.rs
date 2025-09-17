@@ -1,5 +1,12 @@
+use actix_web::body::BoxBody;
+use actix_web::http::header::HeaderName;
+use actix_web::middleware::{from_fn, Condition, Logger, Next};
+use actix_web::{
+    dev::{ServiceRequest, ServiceResponse},
+    Error,
+};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use actix_web::middleware::Logger;
+
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -36,7 +43,7 @@ pub struct ApiIntegerSparseMatrix {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SparseLEIntegerPolyhedron {
     A: ApiIntegerSparseMatrix,
-    b: Vec<i32>,              // LE right-hand side
+    b: Vec<i32>, // LE right-hand side
     variables: Vec<ApiVariable>,
 }
 
@@ -203,13 +210,17 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     let variable_count = req.polyhedron.variables.len();
     let column_count = req.polyhedron.A.shape.ncols;
     if variable_count != column_count {
-        return Err(HttpResponse::BadRequest().json(serde_json::json!({ "error": "Number of variables must match number of columns in A" })));
+        return Err(HttpResponse::BadRequest().json(
+            serde_json::json!({ "error": "Number of variables must match number of columns in A" }),
+        ));
     }
 
     let b_count = req.polyhedron.b.len();
     let row_count = req.polyhedron.A.shape.nrows;
     if b_count != row_count {
-        return Err(HttpResponse::BadRequest().json(serde_json::json!({ "error": "Number of values in b must match number of rows in A" })));
+        return Err(HttpResponse::BadRequest().json(
+            serde_json::json!({ "error": "Number of values in b must match number of rows in A" }),
+        ));
     }
 
     Ok(())
@@ -223,9 +234,7 @@ pub async fn health_check() -> impl Responder {
 /// GET /docs
 pub async fn docs() -> impl Responder {
     let docs_html = include_str!("../static/docs.html");
-    HttpResponse::Ok()
-        .content_type("text/html")
-        .body(docs_html)
+    HttpResponse::Ok().content_type("text/html").body(docs_html)
 }
 
 /// GET / - Redirect to docs
@@ -233,6 +242,58 @@ pub async fn root_redirect() -> impl Responder {
     HttpResponse::Found()
         .append_header(("Location", "/docs"))
         .finish()
+}
+
+// Middleware
+static X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
+
+#[derive(Clone)]
+struct AuthConfig {
+    token: String,
+}
+
+fn unauthorized_error() -> HttpResponse<BoxBody> {
+    HttpResponse::Unauthorized()
+        .json(serde_json::json!({ "error": "Unauthorized" }))
+        .map_into_boxed_body()
+}
+
+fn forbidden_error() -> HttpResponse<BoxBody> {
+    HttpResponse::Forbidden()
+        .json(serde_json::json!({ "error": "Forbidden" }))
+        .map_into_boxed_body()
+}
+
+fn internal_error() -> HttpResponse<BoxBody> {
+    HttpResponse::InternalServerError()
+        .json(serde_json::json!({ "error": "Internal server error" }))
+        .map_into_boxed_body()
+}
+
+async fn token_auth(
+    req: ServiceRequest,
+    next: Next<BoxBody>,
+) -> Result<ServiceResponse<BoxBody>, Error> {
+    let Some(auth) = req.app_data::<web::Data<AuthConfig>>().cloned() else {
+        return Ok(req.into_response(internal_error()));
+    };
+
+    let Some(raw) = req.headers().get(&X_API_KEY) else {
+        return Ok(req.into_response(unauthorized_error()));
+    };
+
+    let Ok(token) = raw.to_str() else {
+        return Ok(req.into_response(unauthorized_error()));
+    };
+
+    let valid_token = auth.token == token;
+
+    if valid_token {
+        let res = next.call(req).await?;
+        return Ok(res.map_into_boxed_body());
+    }
+
+    Ok(req.into_response(forbidden_error()))
 }
 
 // ---------- Server bootstrap ----------
@@ -249,6 +310,21 @@ async fn main() -> std::io::Result<()> {
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(2 * 1024 * 1024); // default 2 MB
 
+    let protect = env::var("PROTECT")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    let token = if protect {
+        env::var("API_TOKEN").expect("API_TOKEN not available in env")
+    } else {
+        String::new()
+    };
+
+    println!(
+        "Server is {}",
+        if protect { "protected" } else { "unprotected" }
+    );
     println!("Starting server on http://127.0.0.1:{}", port);
     HttpServer::new(move || {
         App::new()
@@ -266,10 +342,17 @@ async fn main() -> std::io::Result<()> {
                         .into()
                     }),
             )
+            .app_data(web::Data::new(AuthConfig {
+                token: token.clone(),
+            }))
             .route("/", web::get().to(root_redirect))
-            .route("/solve", web::post().to(solve))
             .route("/health", web::get().to(health_check))
             .route("/docs", web::get().to(docs))
+            .service(
+                web::scope("")
+                    .wrap(Condition::new(protect, from_fn(token_auth)))
+                    .route("/solve", web::post().to(solve)),
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()

@@ -16,7 +16,7 @@ impl TestServer {
     fn start() -> Self {
         // Get a unique port for this test
         let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-        
+
         let child = Command::new("cargo")
             .args(&["run"])
             .env("PORT", port.to_string())
@@ -25,13 +25,20 @@ impl TestServer {
 
         // Wait longer for server to start
         thread::sleep(Duration::from_secs(5));
-        
+
         // Test if server is responding with better error handling
         let mut server_ready = false;
         for attempt in 0..15 {
             if let Ok(output) = std::process::Command::new("curl")
-                .args(&["-s", "-o", "/dev/null", "-w", "%{http_code}", &format!("http://127.0.0.1:{}/health", port)])
-                .output() 
+                .args(&[
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    &format!("http://127.0.0.1:{}/health", port),
+                ])
+                .output()
             {
                 let status_code = String::from_utf8_lossy(&output.stdout);
                 if status_code.trim() == "200" {
@@ -42,7 +49,7 @@ impl TestServer {
             println!("Attempt {}: Server not ready yet, waiting...", attempt + 1);
             thread::sleep(Duration::from_millis(1000));
         }
-        
+
         if !server_ready {
             panic!("Server failed to start on port {} after 15 seconds", port);
         }
@@ -101,7 +108,7 @@ async fn test_solve_valid_request() {
             "b": [1, 1, 1],
             "variables": [
                 {"id": "x1", "bound": [0, 1]},
-                {"id": "x2", "bound": [0, 1]}, 
+                {"id": "x2", "bound": [0, 1]},
                 {"id": "x3", "bound": [0, 1]}
             ]
         },
@@ -119,12 +126,12 @@ async fn test_solve_valid_request() {
         .expect("Failed to send request");
 
     assert_eq!(response.status(), 200);
-    
+
     let body: serde_json::Value = response
         .json()
         .await
         .expect("Failed to parse JSON response");
-    
+
     assert!(body["solutions"].is_array());
     let solutions = body["solutions"].as_array().unwrap();
     assert!(!solutions.is_empty());
@@ -145,12 +152,12 @@ async fn test_solve_invalid_json() {
         .expect("Failed to send request");
 
     assert_eq!(response.status(), 400);
-    
+
     let body: serde_json::Value = response
         .json()
         .await
         .expect("Failed to parse JSON response");
-    
+
     assert!(body["error"].is_string());
 }
 
@@ -188,12 +195,12 @@ async fn test_solve_minimize_direction() {
         .expect("Failed to send request");
 
     assert_eq!(response.status(), 200);
-    
+
     let body: serde_json::Value = response
         .json()
         .await
         .expect("Failed to parse JSON response");
-    
+
     assert!(body["solutions"].is_array());
 }
 
@@ -225,8 +232,196 @@ async fn test_docs_endpoint() {
         .expect("Failed to send request");
 
     assert_eq!(response.status(), 200);
-    
+
     let body = response.text().await.expect("Failed to read response body");
     assert!(body.contains("GLPK Rust API Documentation"));
     assert!(body.contains("<!DOCTYPE html"));
+}
+
+struct TestServerWithAuth {
+    child: Option<Child>,
+    port: u16,
+}
+
+impl TestServerWithAuth {
+    fn start() -> Self {
+        // Get a unique port for this test
+        let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
+
+        let child = Command::new("cargo")
+            .args(&["run"])
+            .env("PORT", port.to_string())
+            .env("PROTECT", "true")
+            .env("API_TOKEN", "secret")
+            .spawn()
+            .expect("Failed to start test server");
+
+        // Wait longer for server to start
+        thread::sleep(Duration::from_secs(5));
+
+        // Test if server is responding with better error handling
+        let mut server_ready = false;
+        for attempt in 0..15 {
+            if let Ok(output) = std::process::Command::new("curl")
+                .args(&[
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    &format!("http://127.0.0.1:{}/health", port),
+                ])
+                .output()
+            {
+                let status_code = String::from_utf8_lossy(&output.stdout);
+                if status_code.trim() == "200" {
+                    server_ready = true;
+                    break;
+                }
+            }
+            println!("Attempt {}: Server not ready yet, waiting...", attempt + 1);
+            thread::sleep(Duration::from_millis(1000));
+        }
+
+        if !server_ready {
+            panic!("Server failed to start on port {} after 15 seconds", port);
+        }
+
+        TestServerWithAuth {
+            child: Some(child),
+            port,
+        }
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+}
+
+impl Drop for TestServerWithAuth {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_empty_endpoint_should_bypass_auth() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&format!("{}", _server.base_url()))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 200);
+
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(body.contains("GLPK Rust API Documentation"));
+    assert!(body.contains("<!DOCTYPE html"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_health_endpoint_should_bypass_auth() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&format!("{}/health", _server.base_url()))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("Failed to read response body");
+    assert_eq!(body, "OK");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_docs_endpoint_should_bypass_auth() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&format!("{}/docs", _server.base_url()))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 200);
+
+    let body = response.text().await.expect("Failed to read response body");
+    assert!(body.contains("GLPK Rust API Documentation"));
+    assert!(body.contains("<!DOCTYPE html"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_solve_valid_token() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(&format!("{}/solve", _server.base_url()))
+        .header("content-type", "application/json")
+        .header("x-api-key", "secret")
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 400); // Bad Request due to missing body, but is authorized.
+}
+
+#[tokio::test]
+#[serial]
+async fn test_solve_invalid_token() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(&format!("{}/solve", _server.base_url()))
+        .header("content-type", "application/json")
+        .header("x-api-key", "invalid_token")
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 403);
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse JSON response");
+
+    assert_eq!(body["error"], "Forbidden");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_solve_no_token_header() {
+    let _server = TestServerWithAuth::start();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(&format!("{}/solve", _server.base_url()))
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 401);
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse JSON response");
+
+    assert_eq!(body["error"], "Unauthorized");
 }
