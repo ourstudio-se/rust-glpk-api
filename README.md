@@ -184,6 +184,43 @@ docker build --platform=linux/amd64 -t glpk-api .
 docker push myregistry.com/glpk-api
 ```
 
+#### Pushing to OurStudio Dockerhub
+
+The image is available on [Our Studio's Dockerhub account](https://hub.docker.com/r/ourstudio/rust-glpk-api).
+
+To push a new version:
+
+1. Build the image with the new version number:
+
+```
+$ docker build \
+  -t ourstudio/rust-glpk-api:x.y.z \
+  -t ourstudio/rust-glpk-api:x.z \
+  -t ourstudio/rust-glpk-api:latest .
+```
+
+Where `x`, `y` and `z` are major, minor and patch version numbers.
+
+2. Login to the ourstudio account
+
+```
+$ docker login
+```
+
+Username: ourstudio
+Password: {in Bitwarden}
+
+3. Push the new image
+
+```
+$ docker push \
+  ourstudio/rust-glpk-api:latest \
+  ourstudio/rust-glpk-api:x.y \
+  ourstudio/rust-glpk-api:x.y.z
+```
+
+4. Verify that the new image is available [here](https://hub.docker.com/r/ourstudio/rust-glpk-api/tags).
+
 ## 🧪 Testing
 
 Run the integration tests:
