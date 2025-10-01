@@ -210,20 +210,81 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     let variable_count = req.polyhedron.variables.len();
     let column_count = req.polyhedron.A.shape.ncols;
     if variable_count != column_count {
-        return Err(HttpResponse::BadRequest().json(
-            serde_json::json!({ "error": "Number of variables must match number of columns in A" }),
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Number of variables must match number of columns in A got {} variables and {} columns", variable_count, column_count)
+            }),
         ));
     }
 
     let b_count = req.polyhedron.b.len();
     let row_count = req.polyhedron.A.shape.nrows;
     if b_count != row_count {
-        return Err(HttpResponse::BadRequest().json(
-            serde_json::json!({ "error": "Number of values in b must match number of rows in A" }),
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Number of values in b must match number of rows in A got {} values and {} rows", b_count, row_count)
+            }),
         ));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::StatusCode;
+    use std::collections::HashMap;
+
+    fn make_valid_request() -> SolveRequest {
+        SolveRequest {
+            polyhedron: SparseLEIntegerPolyhedron {
+                A: ApiIntegerSparseMatrix {
+                    rows: vec![0, 1, 2],
+                    cols: vec![0, 1, 2],
+                    vals: vec![1, 2, 3],
+                    shape: ApiShape { nrows: 3, ncols: 3 },
+                },
+                b: vec![10, 20, 30],
+                variables: vec![
+                    ApiVariable { id: "x1".into(), bound: (0, 100) },
+                    ApiVariable { id: "x2".into(), bound: (0, 100) },
+                    ApiVariable { id: "x3".into(), bound: (0, 100) },
+                ],
+            },
+            objectives: vec![{
+                let mut obj = HashMap::new();
+                obj.insert("x1".to_string(), 1.0);
+                obj.insert("x2".to_string(), 2.0);
+                obj
+            }],
+            direction: SolverDirection::Maximize,
+        }
+    }
+
+    #[test]
+    fn validate_solve_request_valid_request() {
+        let req = make_valid_request();
+        assert!(validate_solve_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_solve_request_mismatch_variables_vs_columns_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.variables.pop();
+        let resp = validate_solve_request(&req).unwrap_err();
+        let status = resp.status();
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn validate_solve_request_mismatch_b_vs_rows_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.b.pop();
+        let resp = validate_solve_request(&req).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }
 
 /// GET /health
