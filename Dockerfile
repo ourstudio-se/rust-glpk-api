@@ -36,8 +36,6 @@ Libs.private: -lgmp
 Cflags: -I\${includedir}
 EOF
 
-RUN cat /usr/local/lib/pkgconfig/glpk.pc
-
 # Add the custom glpk.pc file to the path
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig
 
