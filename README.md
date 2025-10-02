@@ -213,10 +213,9 @@ Password: {in Bitwarden}
 3. Push the new image
 
 ```
-$ docker push \
-  ourstudio/rust-glpk-api:latest \
-  ourstudio/rust-glpk-api:x.y \
-  ourstudio/rust-glpk-api:x.y.z
+$ docker push ourstudio/rust-glpk-api:x.y.z
+$ docker push ourstudio/rust-glpk-api:x.y
+$ docker push ourstudio/rust-glpk-api:latest
 ```
 
 4. Verify that the new image is available [here](https://hub.docker.com/r/ourstudio/rust-glpk-api/tags).

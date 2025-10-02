@@ -8,16 +8,36 @@
 
 ARG RUST_VERSION=1.86.0
 ARG APP_NAME=rust-glpk
+ARG GLPK_VER=5.0
 
 ################################################################################
 # Create a stage for building the application.
 
 FROM rust:${RUST_VERSION}-alpine AS build
 ARG APP_NAME
+ARG GLPK_VER
 WORKDIR /app
 
-RUN apk add --no-cache clang lld musl-dev git curl make
-RUN apk add --no-cache glpk-dev
+RUN apk add --no-cache clang lld musl-dev git curl make pkgconf
+RUN apk add --no-cache glpk-dev gmp-dev
+
+# Create glpk.pc file manually because it's not included by default in alpine
+RUN mkdir -p /usr/local/lib/pkgconfig && \
+    cat > /usr/local/lib/pkgconfig/glpk.pc <<EOF
+prefix=/usr
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: glpk
+Description: GNU Linear Programming Kit
+Version: ${GLPK_VER}
+Libs: -L\${libdir} -lglpk
+Libs.private: -lgmp
+Cflags: -I\${includedir}
+EOF
+
+# Add the custom glpk.pc file to the path
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig
 
 # Viktigt för att kunna använda ${TARGETPLATFORM} i RUN
 ARG TARGETPLATFORM
