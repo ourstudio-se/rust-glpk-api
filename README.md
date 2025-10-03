@@ -207,9 +207,8 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t ourstudio/rust-glpk-api:x.y.z \
   -t ourstudio/rust-glpk-api:x.z \
-  -t ourstudio/rust-glpk-api:latest .
+  -t ourstudio/rust-glpk-api:latest \
   --push .
-```
 
 Where `x`, `y` and `z` are major, minor and patch version numbers.
 
