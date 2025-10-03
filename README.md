@@ -206,7 +206,7 @@ docker buildx create --use
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t ourstudio/rust-glpk-api:x.y.z \
-  -t ourstudio/rust-glpk-api:x.z \
+  -t ourstudio/rust-glpk-api:x.y \
   -t ourstudio/rust-glpk-api:latest \
   --push .
 
