@@ -2,7 +2,7 @@
 name = "glpk-api-sdk"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Rikard Olsson <rikard@ourstudio.com>"]
 description = "Rust client SDK for GLPK REST API"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ourstudio-se/rust-glpk-api"
