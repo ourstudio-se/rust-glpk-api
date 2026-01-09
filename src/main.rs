@@ -99,7 +99,7 @@ impl From<GlpkStatus> for Status {
 struct ApiSolution {
     status: Status,
     objective: i32, // matches glpk_rust’s current output
-    solution: HashMap<String, i64>,
+    solution: HashMap<String, i32>,
     error: Option<String>,
 }
 
@@ -134,7 +134,7 @@ fn api_le_to_glpk_le<'a>(
         .collect();
 
     GlpkPoly {
-        A: glpk_a,
+        a: glpk_a,
         b: glpk_b,
         variables: glpk_vars,
         double_bound: false,
