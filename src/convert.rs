@@ -3,6 +3,7 @@ use crate::models::{
     SparseLEIntegerPolyhedron,
     ApiIntegerSparseMatrix,
     ApiSolution,
+    Status,
 };
 use std::collections::HashMap;
 
@@ -12,6 +13,7 @@ use glpk_rust::{
     SparseLEIntegerPolyhedron as GlpkPoly, 
     Variable as GlpkVar,
     Solution,
+    Status as GlpkStatus,
 };
 
 pub fn to_many_borrowed_objectives(objectives: &Vec<ObjectiveOwned>) -> Vec<HashMap<&str, f64>> {
@@ -61,6 +63,23 @@ fn to_glpk_matrix(m: &ApiIntegerSparseMatrix) -> GlpkMatrix {
         rows: m.rows.clone(),
         cols: m.cols.clone(),
         vals: m.vals.clone(),
+    }
+}
+
+impl From<GlpkStatus> for Status {
+    fn from(s: GlpkStatus) -> Self {
+        // Assumes your crate uses the same variant names
+        match s {
+            GlpkStatus::Undefined => Status::Undefined,
+            GlpkStatus::Feasible => Status::Feasible,
+            GlpkStatus::Infeasible => Status::Infeasible,
+            GlpkStatus::NoFeasible => Status::NoFeasible,
+            GlpkStatus::Optimal => Status::Optimal,
+            GlpkStatus::Unbounded => Status::Unbounded,
+            GlpkStatus::SimplexFailed => Status::SimplexFailed,
+            GlpkStatus::MIPFailed => Status::MIPFailed,
+            GlpkStatus::EmptySpace => Status::EmptySpace,
+        }
     }
 }
 

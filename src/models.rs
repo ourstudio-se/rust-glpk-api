@@ -22,23 +22,6 @@ pub enum Status {
     EmptySpace = 9,
 }
 
-impl From<GlpkStatus> for Status {
-    fn from(s: GlpkStatus) -> Self {
-        // Assumes your crate uses the same variant names
-        match s {
-            GlpkStatus::Undefined => Status::Undefined,
-            GlpkStatus::Feasible => Status::Feasible,
-            GlpkStatus::Infeasible => Status::Infeasible,
-            GlpkStatus::NoFeasible => Status::NoFeasible,
-            GlpkStatus::Optimal => Status::Optimal,
-            GlpkStatus::Unbounded => Status::Unbounded,
-            GlpkStatus::SimplexFailed => Status::SimplexFailed,
-            GlpkStatus::MIPFailed => Status::MIPFailed,
-            GlpkStatus::EmptySpace => Status::EmptySpace,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct ApiSolution {
     pub status: Status,

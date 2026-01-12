@@ -25,8 +25,6 @@ use actix_web::{
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 
 use dotenv::dotenv;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 
 // ── Bring in the library types and alias the solver function to avoid name clash
