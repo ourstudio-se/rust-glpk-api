@@ -8,7 +8,12 @@ use crate::{
     SolveRequest, 
     SolverDirection,
 };
-use glpk_rust::solve_ilps as glpk_solve_ilps;
+
+use glpk_rust::{
+    solve_ilps as glpk_solve_ilps,
+    Bound, IntegerSparseMatrix as GlpkMatrix,
+    SparseLEIntegerPolyhedron as GlpkPoly, Status as GlpkStatus, Variable as GlpkVar, Solution
+};
 
 /// POST /solve
 pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
@@ -33,8 +38,6 @@ pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
 
     // Build a borrowed LE polyhedron for the solver
     let glpk_polyhedron = api_le_to_glpk_le(&req.polyhedron, &id_storage);
-    // Solver expects &mut
-    let mut glpk_polyhedron = glpk_polyhedron;
 
     // Convert objectives from HashMap<String, f64> → HashMap<&str, f64>
     // and ignore objective vars not in the polytope (as per your spec).
@@ -52,8 +55,17 @@ pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
 
     let maximize = req.direction == SolverDirection::Maximize;
 
-    // Call the library solver
-    let lib_solutions = glpk_solve_ilps(&mut glpk_polyhedron, borrowed_objectives, maximize, false);
+    let solve_result = solve_inner(
+        glpk_polyhedron, 
+        borrowed_objectives, 
+        maximize,
+    );
+
+    let lib_solutions: Vec<Solution>;
+    match solve_result {
+        Ok(solutions) => lib_solutions = solutions,
+        Err(_) => return Err(HttpResponse::InternalServerError().json("Something went wrong")),
+    }
 
     // Map library solutions → API solutions with owned Strings
     let api_solutions: Vec<ApiSolution> = lib_solutions
@@ -71,4 +83,28 @@ pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
         .collect();
 
     return Ok(api_solutions);
+}
+
+enum SolveError {
+    InvalidInput,
+}
+
+/// POST /solve
+fn solve_inner(
+    polyhedron: GlpkPoly,
+    objectives: Vec<HashMap<&str, f64>>,
+    maximize: bool,
+) -> Result<Vec<Solution>, SolveError> {
+    // Solver expects &mut
+    let mut mut_polyhedron = polyhedron;
+
+    // Call the library solver
+    let solutions = glpk_solve_ilps(
+        &mut mut_polyhedron, 
+        objectives, 
+        maximize,
+         false,
+        );
+        
+    return Ok(solutions);
 }
