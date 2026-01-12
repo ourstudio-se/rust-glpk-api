@@ -1,6 +1,17 @@
 mod solve;
+mod convert;
+mod models;
 
-use solve::solve2;
+use models::{
+    SolverDirection,
+    SolveRequest, 
+    SparseLEIntegerPolyhedron, 
+    ApiIntegerSparseMatrix, 
+    ApiVariable,
+    ApiShape,
+};
+use convert::to_many_borrowed_objectives;
+use solve::solve_inner;
 
 use actix_web::body::BoxBody;
 use actix_web::http::header::HeaderName;
@@ -19,53 +30,10 @@ use std::env;
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::{
     Bound, IntegerSparseMatrix as GlpkMatrix,
-    SparseLEIntegerPolyhedron as GlpkPoly, Status as GlpkStatus, Variable as GlpkVar,
+    SparseLEIntegerPolyhedron as GlpkPoly, Status as GlpkStatus, Variable as GlpkVar, Solution,
 };
 
-// ---------- API (wire) types: owned & serde-friendly ----------
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ApiVariable {
-    id: String,
-    bound: Bound, // (i32, i32) from glpk_rust
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ApiShape {
-    nrows: usize,
-    ncols: usize,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ApiIntegerSparseMatrix {
-    rows: Vec<i32>,
-    cols: Vec<i32>,
-    vals: Vec<i32>,
-    shape: ApiShape,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SparseLEIntegerPolyhedron {
-    A: ApiIntegerSparseMatrix,
-    b: Vec<i32>, // LE right-hand side
-    variables: Vec<ApiVariable>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum SolverDirection {
-    Maximize,
-    Minimize,
-}
-
-type ObjectiveOwned = HashMap<String, f64>;
-
-#[derive(Deserialize)]
-pub struct SolveRequest {
-    polyhedron: SparseLEIntegerPolyhedron,
-    objectives: Vec<ObjectiveOwned>,
-    direction: SolverDirection,
-}
+use crate::convert::to_glpk_polyhedron;
 
 // ---------- API response types (decoupled from the lib) ----------
 
@@ -107,52 +75,52 @@ struct ApiSolution {
     error: Option<String>,
 }
 
-// ---------- Helpers: convert API types → glpk_rust types ----------
-
-fn api_matrix_to_glpk(m: &ApiIntegerSparseMatrix) -> GlpkMatrix {
-    GlpkMatrix {
-        rows: m.rows.clone(),
-        cols: m.cols.clone(),
-        vals: m.vals.clone(),
-    }
-}
-
-/// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.
-fn api_le_to_glpk_le<'a>(
-    le: &'a SparseLEIntegerPolyhedron,
-    id_storage: &'a [String],
-) -> GlpkPoly<'a> {
-    let glpk_a = api_matrix_to_glpk(&le.A);
-    let glpk_b: Vec<Bound> = le.b.iter().map(|&v| (0, v)).collect();
-
-    // Borrowed variables from id_storage
-    // Ensure id_storage was created from le.variables in the same order
-    let glpk_vars: Vec<GlpkVar<'a>> = le
-        .variables
-        .iter()
-        .zip(id_storage.iter())
-        .map(|(v, id)| GlpkVar {
-            id: id.as_str(),
-            bound: v.bound,
-        })
-        .collect();
-
-    GlpkPoly {
-        a: glpk_a,
-        b: glpk_b,
-        variables: glpk_vars,
-        double_bound: false,
-    }
-}
-
 // ---------- Route handlers ----------
 
 /// POST /solve
 pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
-    match solve2(&req) {
-        Ok(solutions) => return HttpResponse::Ok().json(serde_json::json!({ "solutions": solutions })),
+    match validate_solve_request(&req) {
+        Ok(_) => (),
         Err(response) => return response,
     }
+
+    let glpk_polyhedron = to_glpk_polyhedron(&req.polyhedron);
+    let borrowed_objectives = to_many_borrowed_objectives(&req.objectives);
+    let maximize = req.direction == SolverDirection::Maximize;
+
+    // Call the library solver
+    let solve_result = solve_inner(
+        glpk_polyhedron, 
+        borrowed_objectives, 
+        maximize,
+    );
+
+    let lib_solutions: Vec<Solution>;
+    match solve_result {
+        Ok(solutions) => lib_solutions = solutions,
+        Err(error) => return HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": error.details,
+            }),
+        ),
+    }
+
+    // Map library solutions → API solutions with owned Strings
+    let api_solutions: Vec<ApiSolution> = lib_solutions
+        .into_iter()
+        .map(|s| ApiSolution {
+            status: s.status.into(),
+            objective: s.objective,
+            solution: s
+                .solution
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+            error: s.error,
+        })
+        .collect();
+
+    HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
 }
 
 fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
