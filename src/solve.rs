@@ -64,7 +64,13 @@ pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
     let lib_solutions: Vec<Solution>;
     match solve_result {
         Ok(solutions) => lib_solutions = solutions,
-        Err(_) => return Err(HttpResponse::InternalServerError().json("Something went wrong")),
+        Err(error) => return Err(
+            HttpResponse::UnprocessableEntity().json(
+                serde_json::json!({
+                    "error": error.details,
+                }),
+            ),
+        ),
     }
 
     // Map library solutions → API solutions with owned Strings
@@ -85,16 +91,20 @@ pub fn solve2(req: &SolveRequest) -> Result<Vec<ApiSolution>, HttpResponse> {
     return Ok(api_solutions);
 }
 
-enum SolveError {
-    InvalidInput,
+struct SolveInputError{
+    details: String,
 }
 
-/// POST /solve
 fn solve_inner(
     polyhedron: GlpkPoly,
     objectives: Vec<HashMap<&str, f64>>,
     maximize: bool,
-) -> Result<Vec<Solution>, SolveError> {
+) -> Result<Vec<Solution>, SolveInputError> {
+    match validate_polyhedron(&polyhedron) {
+        Ok(_) => (),
+        Err(error) => return Err(error),
+    }
+
     // Solver expects &mut
     let mut mut_polyhedron = polyhedron;
 
@@ -107,4 +117,36 @@ fn solve_inner(
         );
         
     return Ok(solutions);
+}
+
+fn validate_polyhedron(polyhedron: &GlpkPoly) -> Result<(), SolveInputError> {
+    let variable_count = polyhedron.variables.len();
+    let column_count = polyhedron.a.cols.len();
+    if variable_count != column_count {
+        return Err(
+            SolveInputError{ 
+                details: format!(
+                    "Number of variables must match number of columns in A got {} variables and {} columns", 
+                    variable_count, 
+                    column_count,
+                ) 
+            }
+        );
+    }
+
+    let b_count = polyhedron.b.len();
+    let row_count = polyhedron.a.rows.len();
+    if b_count != row_count {
+        return Err(
+            SolveInputError{ 
+                details: format!(
+                    "Number of values in b must match number of rows in A got {} values and {} rows", 
+                    b_count, 
+                    row_count,
+                ) 
+            }
+        );
+    }
+
+    Ok(())
 }
