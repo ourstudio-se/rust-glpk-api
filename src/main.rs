@@ -1,3 +1,7 @@
+mod solve;
+
+use solve::solve2;
+
 use actix_web::body::BoxBody;
 use actix_web::http::header::HeaderName;
 use actix_web::middleware::{from_fn, Condition, Logger, Next};
@@ -14,7 +18,7 @@ use std::env;
 
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::{
-    solve_ilps as glpk_solve_ilps, Bound, IntegerSparseMatrix as GlpkMatrix,
+    Bound, IntegerSparseMatrix as GlpkMatrix,
     SparseLEIntegerPolyhedron as GlpkPoly, Status as GlpkStatus, Variable as GlpkVar,
 };
 
@@ -145,65 +149,10 @@ fn api_le_to_glpk_le<'a>(
 
 /// POST /solve
 pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
-    match validate_solve_request(&req) {
-        Ok(_) => (),
+    match solve2(&req) {
+        Ok(solutions) => return HttpResponse::Ok().json(serde_json::json!({ "solutions": solutions })),
         Err(response) => return response,
     }
-
-    // Keep owned IDs alive while GLPK borrows &str from them
-    let id_storage: Vec<String> = req
-        .polyhedron
-        .variables
-        .iter()
-        .map(|v| v.id.clone())
-        .collect();
-
-    // Build a quick intern map (&str -> &str) so we can map objective keys to the same &strs as variables
-    let mut intern: HashMap<&str, &str> = HashMap::with_capacity(id_storage.len());
-    for s in &id_storage {
-        intern.insert(s.as_str(), s.as_str());
-    }
-
-    // Build a borrowed LE polyhedron for the solver
-    let glpk_polyhedron = api_le_to_glpk_le(&req.polyhedron, &id_storage);
-    // Solver expects &mut
-    let mut glpk_polyhedron = glpk_polyhedron;
-
-    // Convert objectives from HashMap<String, f64> → HashMap<&str, f64>
-    // and ignore objective vars not in the polytope (as per your spec).
-    let mut borrowed_objectives: Vec<HashMap<&str, f64>> = Vec::with_capacity(req.objectives.len());
-    for obj in &req.objectives {
-        let mut bobj: HashMap<&str, f64> = HashMap::with_capacity(obj.len());
-        for (k, v) in obj {
-            if let Some(&interned) = intern.get(k.as_str()) {
-                bobj.insert(interned, *v);
-            }
-            // else: silently ignore unknown var (per your comment)
-        }
-        borrowed_objectives.push(bobj);
-    }
-
-    let maximize = req.direction == SolverDirection::Maximize;
-
-    // Call the library solver
-    let lib_solutions = glpk_solve_ilps(&mut glpk_polyhedron, borrowed_objectives, maximize, false);
-
-    // Map library solutions → API solutions with owned Strings
-    let api_solutions: Vec<ApiSolution> = lib_solutions
-        .into_iter()
-        .map(|s| ApiSolution {
-            status: s.status.into(),
-            objective: s.objective,
-            solution: s
-                .solution
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            error: s.error,
-        })
-        .collect();
-
-    HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
 }
 
 fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
