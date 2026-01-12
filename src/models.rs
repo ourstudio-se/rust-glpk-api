@@ -3,7 +3,49 @@ use std::collections::HashMap;
 
 use glpk_rust::{
     Bound,
+    Status as GlpkStatus,
 };
+
+
+// ---------- API response types (decoupled from the lib) ----------
+
+#[derive(Serialize, Deserialize)]
+pub enum Status {
+    Undefined = 1,
+    Feasible = 2,
+    Infeasible = 3,
+    NoFeasible = 4,
+    Optimal = 5,
+    Unbounded = 6,
+    SimplexFailed = 7,
+    MIPFailed = 8,
+    EmptySpace = 9,
+}
+
+impl From<GlpkStatus> for Status {
+    fn from(s: GlpkStatus) -> Self {
+        // Assumes your crate uses the same variant names
+        match s {
+            GlpkStatus::Undefined => Status::Undefined,
+            GlpkStatus::Feasible => Status::Feasible,
+            GlpkStatus::Infeasible => Status::Infeasible,
+            GlpkStatus::NoFeasible => Status::NoFeasible,
+            GlpkStatus::Optimal => Status::Optimal,
+            GlpkStatus::Unbounded => Status::Unbounded,
+            GlpkStatus::SimplexFailed => Status::SimplexFailed,
+            GlpkStatus::MIPFailed => Status::MIPFailed,
+            GlpkStatus::EmptySpace => Status::EmptySpace,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ApiSolution {
+    pub status: Status,
+    pub objective: i32, // matches glpk_rust’s current output
+    pub solution: HashMap<String, i32>,
+    pub error: Option<String>,
+}
 
 // ---------- API (wire) types: owned & serde-friendly ----------
 

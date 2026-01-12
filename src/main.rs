@@ -5,6 +5,8 @@ mod models;
 use models::{
     SolverDirection,
     SolveRequest, 
+    ApiSolution,
+    Status,
     SparseLEIntegerPolyhedron, 
     ApiIntegerSparseMatrix, 
     ApiVariable,
@@ -29,51 +31,11 @@ use std::env;
 
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::{
-    Bound, IntegerSparseMatrix as GlpkMatrix,
-    SparseLEIntegerPolyhedron as GlpkPoly, Status as GlpkStatus, Variable as GlpkVar, Solution,
+    Solution,
 };
 
 use crate::convert::to_glpk_polyhedron;
 
-// ---------- API response types (decoupled from the lib) ----------
-
-#[derive(Serialize, Deserialize)]
-enum Status {
-    Undefined = 1,
-    Feasible = 2,
-    Infeasible = 3,
-    NoFeasible = 4,
-    Optimal = 5,
-    Unbounded = 6,
-    SimplexFailed = 7,
-    MIPFailed = 8,
-    EmptySpace = 9,
-}
-
-impl From<GlpkStatus> for Status {
-    fn from(s: GlpkStatus) -> Self {
-        // Assumes your crate uses the same variant names
-        match s {
-            GlpkStatus::Undefined => Status::Undefined,
-            GlpkStatus::Feasible => Status::Feasible,
-            GlpkStatus::Infeasible => Status::Infeasible,
-            GlpkStatus::NoFeasible => Status::NoFeasible,
-            GlpkStatus::Optimal => Status::Optimal,
-            GlpkStatus::Unbounded => Status::Unbounded,
-            GlpkStatus::SimplexFailed => Status::SimplexFailed,
-            GlpkStatus::MIPFailed => Status::MIPFailed,
-            GlpkStatus::EmptySpace => Status::EmptySpace,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct ApiSolution {
-    status: Status,
-    objective: i32, // matches glpk_rust’s current output
-    solution: HashMap<String, i32>,
-    error: Option<String>,
-}
 
 // ---------- Route handlers ----------
 
@@ -108,16 +70,7 @@ pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
     // Map library solutions → API solutions with owned Strings
     let api_solutions: Vec<ApiSolution> = lib_solutions
         .into_iter()
-        .map(|s| ApiSolution {
-            status: s.status.into(),
-            objective: s.objective,
-            solution: s
-                .solution
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            error: s.error,
-        })
+        .map(|s| s.into())
         .collect();
 
     HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
