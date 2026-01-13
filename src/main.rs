@@ -1,4 +1,4 @@
-mod solve;
+mod domain;
 mod convert;
 mod models;
 
@@ -6,14 +6,10 @@ use models::{
     SolverDirection,
     SolveRequest, 
     ApiSolution,
-    Status,
-    SparseLEIntegerPolyhedron, 
-    ApiIntegerSparseMatrix, 
-    ApiVariable,
-    ApiShape,
 };
+
 use convert::to_many_borrowed_objectives;
-use solve::solve_inner;
+use domain::solve::solve as solve_inner;
 
 use actix_web::body::BoxBody;
 use actix_web::http::header::HeaderName;
@@ -103,6 +99,14 @@ mod tests {
     use super::*;
     use actix_web::http::StatusCode;
     use std::collections::HashMap;
+
+
+    use models::{
+        SparseLEIntegerPolyhedron, 
+        ApiIntegerSparseMatrix, 
+        ApiVariable,
+        ApiShape,
+    };
 
     fn make_valid_request() -> SolveRequest {
         SolveRequest {

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use glpk_rust::{
     Bound,
-    Status as GlpkStatus,
 };
 
 
@@ -68,6 +67,7 @@ pub struct SolveRequest {
     pub direction: SolverDirection,
 }
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SparseLEIntegerPolyhedron {
     pub A: ApiIntegerSparseMatrix,
