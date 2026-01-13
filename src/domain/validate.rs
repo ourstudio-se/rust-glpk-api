@@ -13,10 +13,13 @@ pub fn validate_objectives(
     let variable_ids: HashSet<&str> = variables.iter().map(|v| v.id).collect();
 
     for objective in objectives {
-        for (objective_variable, _) in objective {
-            if !variable_ids.contains(objective_variable) {
+        for objective_variable_id in objective.keys() {
+            if !variable_ids.contains(objective_variable_id) {
                 return Err(SolveInputError {
-                    details: format!("Objective contains missing variable {}", objective_variable,),
+                    details: format!(
+                        "Objective contains missing variable {}",
+                        objective_variable_id,
+                    ),
                 });
             }
         }

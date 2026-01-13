@@ -14,7 +14,7 @@ pub fn to_many_borrowed_objectives(objectives: &Vec<ObjectiveOwned>) -> Vec<Hash
         let borrowed_obj = to_borrowed_objective(obj);
         borrowed_objectives.push(borrowed_obj);
     }
-    return borrowed_objectives;
+    borrowed_objectives
 }
 
 pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
@@ -22,7 +22,7 @@ pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
     for (k, v) in obj {
         borrowed_obj.insert(k.as_str(), *v);
     }
-    return borrowed_obj;
+    borrowed_obj
 }
 
 /// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.

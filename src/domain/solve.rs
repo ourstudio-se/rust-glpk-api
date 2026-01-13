@@ -20,5 +20,5 @@ pub fn solve(
     // Call the library solver
     let solutions = glpk_solve_ilps(&mut mut_polyhedron, objectives, maximize, false);
 
-    return Ok(solutions);
+    Ok(solutions)
 }
