@@ -4,6 +4,8 @@ use crate::domain::validate::{validate_objectives, SolveInputError};
 
 use glpk_rust::{solve_ilps as glpk_solve_ilps, Solution, SparseLEIntegerPolyhedron as GlpkPoly};
 
+const NO_TERMINAL_OUTPUT: bool = false;
+
 pub fn solve(
     polyhedron: GlpkPoly,
     objectives: Vec<HashMap<&str, f64>>,
@@ -18,7 +20,12 @@ pub fn solve(
     let mut mut_polyhedron = polyhedron;
 
     // Call the library solver
-    let solutions = glpk_solve_ilps(&mut mut_polyhedron, objectives, maximize, false);
+    let solutions = glpk_solve_ilps(
+        &mut mut_polyhedron,
+        objectives,
+        maximize,
+        NO_TERMINAL_OUTPUT,
+    );
 
     Ok(solutions)
 }
