@@ -1,6 +1,6 @@
 [package]
 name = "rust-glpk"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dotenv = "0.15.0"
 env_logger = "0.11.8"
-glpk-rust = "0.1.6"
+glpk-rust = "0.1.12"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
