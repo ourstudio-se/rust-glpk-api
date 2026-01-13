@@ -18,7 +18,7 @@
 //!         .add_constraint(vec![1, 1, 0], vec![0, 1, 0], vec![1, 1, 0], 1)
 //!         .add_constraint(vec![1, 1, 0], vec![0, 2, 0], vec![1, 1, 0], 1)
 //!         .add_constraint(vec![1, 1, 0], vec![1, 2, 0], vec![1, 1, 0], 1)
-//!         .add_objective([("x3", 1.0)].into())
+//!         .add_objective([("x3".to_string(), 1.0)].into())
 //!         .direction(SolverDirection::Maximize)
 //!         .build()?;
 //!

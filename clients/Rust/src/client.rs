@@ -109,7 +109,7 @@ impl GlpkClient {
     ///     .add_variable(Variable::new("x1", 0, 100))
     ///     .add_variable(Variable::new("x2", 0, 100))
     ///     .add_constraint(vec![1, 1], vec![0, 1], vec![2, 3], 10)
-    ///     .add_objective([("x1", 1.0), ("x2", 2.0)].into())
+    ///     .add_objective([("x1".to_string(), 1.0), ("x2".to_string(), 2.0)].into())
     ///     .direction(SolverDirection::Maximize)
     ///     .build()?;
     ///
