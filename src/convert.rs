@@ -1,19 +1,11 @@
 use crate::models::{
-    ObjectiveOwned, 
-    SparseLEIntegerPolyhedron,
-    ApiIntegerSparseMatrix,
-    ApiSolution,
-    Status,
+    ApiIntegerSparseMatrix, ApiSolution, ObjectiveOwned, SparseLEIntegerPolyhedron, Status,
 };
 use std::collections::HashMap;
 
 use glpk_rust::{
-    Bound,
-    IntegerSparseMatrix as GlpkMatrix,
-    SparseLEIntegerPolyhedron as GlpkPoly, 
-    Variable as GlpkVar,
-    Solution,
-    Status as GlpkStatus,
+    Bound, IntegerSparseMatrix as GlpkMatrix, Solution, SparseLEIntegerPolyhedron as GlpkPoly,
+    Status as GlpkStatus, Variable as GlpkVar,
 };
 
 pub fn to_many_borrowed_objectives(objectives: &Vec<ObjectiveOwned>) -> Vec<HashMap<&str, f64>> {
@@ -36,16 +28,13 @@ pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
 /// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.
 pub fn to_glpk_polyhedron<'a>(le: &'a SparseLEIntegerPolyhedron) -> GlpkPoly<'a> {
     let a = to_glpk_matrix(&le.A);
-    let b: Vec<Bound> = le.b
-        .iter()
-        .map(|&v| (0, v))
-        .collect();
+    let b: Vec<Bound> = le.b.iter().map(|&v| (0, v)).collect();
 
     let variables: Vec<GlpkVar<'a>> = le
         .variables
         .iter()
         .map(|v| GlpkVar {
-            id: v.id.as_str(),  // borrow directly from ApiVariable
+            id: v.id.as_str(), // borrow directly from ApiVariable
             bound: v.bound,
         })
         .collect();

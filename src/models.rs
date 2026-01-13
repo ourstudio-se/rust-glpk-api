@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use glpk_rust::{
-    Bound,
-};
-
+use glpk_rust::Bound;
 
 // ---------- API response types (decoupled from the lib) ----------
 

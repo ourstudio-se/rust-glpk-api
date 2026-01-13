@@ -1,12 +1,8 @@
-mod domain;
 mod convert;
+mod domain;
 mod models;
 
-use models::{
-    SolverDirection,
-    SolveRequest, 
-    ApiSolution,
-};
+use models::{ApiSolution, SolveRequest, SolverDirection};
 
 use convert::to_many_borrowed_objectives;
 use domain::solve::solve as solve_inner;
@@ -24,12 +20,9 @@ use dotenv::dotenv;
 use std::env;
 
 // ── Bring in the library types and alias the solver function to avoid name clash
-use glpk_rust::{
-    Solution,
-};
+use glpk_rust::Solution;
 
 use crate::convert::to_glpk_polyhedron;
-
 
 // ---------- Route handlers ----------
 
@@ -45,27 +38,20 @@ pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
     let maximize = req.direction == SolverDirection::Maximize;
 
     // Call the library solver
-    let solve_result = solve_inner(
-        glpk_polyhedron, 
-        borrowed_objectives, 
-        maximize,
-    );
+    let solve_result = solve_inner(glpk_polyhedron, borrowed_objectives, maximize);
 
     let lib_solutions: Vec<Solution>;
     match solve_result {
         Ok(solutions) => lib_solutions = solutions,
-        Err(error) => return HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
+        Err(error) => {
+            return HttpResponse::UnprocessableEntity().json(serde_json::json!({
                 "error": error.details,
-            }),
-        ),
+            }))
+        }
     }
 
     // Map library solutions → API solutions with owned Strings
-    let api_solutions: Vec<ApiSolution> = lib_solutions
-        .into_iter()
-        .map(|s| s.into())
-        .collect();
+    let api_solutions: Vec<ApiSolution> = lib_solutions.into_iter().map(|s| s.into()).collect();
 
     HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
 }
@@ -100,13 +86,7 @@ mod tests {
     use actix_web::http::StatusCode;
     use std::collections::HashMap;
 
-
-    use models::{
-        SparseLEIntegerPolyhedron, 
-        ApiIntegerSparseMatrix, 
-        ApiVariable,
-        ApiShape,
-    };
+    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron};
 
     fn make_valid_request() -> SolveRequest {
         SolveRequest {
@@ -119,9 +99,18 @@ mod tests {
                 },
                 b: vec![10, 20, 30],
                 variables: vec![
-                    ApiVariable { id: "x1".into(), bound: (0, 100) },
-                    ApiVariable { id: "x2".into(), bound: (0, 100) },
-                    ApiVariable { id: "x3".into(), bound: (0, 100) },
+                    ApiVariable {
+                        id: "x1".into(),
+                        bound: (0, 100),
+                    },
+                    ApiVariable {
+                        id: "x2".into(),
+                        bound: (0, 100),
+                    },
+                    ApiVariable {
+                        id: "x3".into(),
+                        bound: (0, 100),
+                    },
                 ],
             },
             objectives: vec![{

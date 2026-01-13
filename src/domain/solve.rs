@@ -1,14 +1,8 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
-use crate::domain::validate::{
-    validate_objectives, 
-    SolveInputError,
-};
+use crate::domain::validate::{validate_objectives, SolveInputError};
 
-use glpk_rust::{
-    solve_ilps as glpk_solve_ilps,
-    SparseLEIntegerPolyhedron as GlpkPoly, Solution
-};
+use glpk_rust::{solve_ilps as glpk_solve_ilps, Solution, SparseLEIntegerPolyhedron as GlpkPoly};
 
 pub fn solve(
     polyhedron: GlpkPoly,
@@ -24,12 +18,7 @@ pub fn solve(
     let mut mut_polyhedron = polyhedron;
 
     // Call the library solver
-    let solutions = glpk_solve_ilps(
-        &mut mut_polyhedron, 
-        objectives, 
-        maximize,
-         false,
-        );
-        
+    let solutions = glpk_solve_ilps(&mut mut_polyhedron, objectives, maximize, false);
+
     return Ok(solutions);
 }
