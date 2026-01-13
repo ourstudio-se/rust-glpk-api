@@ -33,7 +33,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_objectives_given_valid_objectives_should_return_ok() {
+    fn test_validate_objectives_given_valid_objectives() {
         let variables = vec![
             Variable {
                 id: "x1",
@@ -49,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_objectives_given_missing_variable_should_return_error() {
+    fn test_validate_objectives_given_missing_variable() {
         let variables = vec![
             Variable {
                 id: "x1",
