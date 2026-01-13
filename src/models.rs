@@ -64,10 +64,10 @@ pub struct SolveRequest {
     pub direction: SolverDirection,
 }
 
-#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SparseLEIntegerPolyhedron {
-    pub A: ApiIntegerSparseMatrix,
+    #[serde(rename = "A")]
+    pub a: ApiIntegerSparseMatrix,
     pub b: Vec<i32>, // LE right-hand side
     pub variables: Vec<ApiVariable>,
 }

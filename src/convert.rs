@@ -27,7 +27,7 @@ pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
 
 /// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.
 pub fn to_glpk_polyhedron<'a>(le: &'a SparseLEIntegerPolyhedron) -> GlpkPoly<'a> {
-    let a = to_glpk_matrix(&le.A);
+    let a = to_glpk_matrix(&le.a);
     let b: Vec<Bound> = le.b.iter().map(|&v| (0, v)).collect();
 
     let variables: Vec<GlpkVar<'a>> = le

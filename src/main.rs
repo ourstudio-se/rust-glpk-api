@@ -58,7 +58,7 @@ pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
 
 fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     let variable_count = req.polyhedron.variables.len();
-    let column_count = req.polyhedron.A.shape.ncols;
+    let column_count = req.polyhedron.a.shape.ncols;
     if variable_count != column_count {
         return Err(HttpResponse::UnprocessableEntity().json(
             serde_json::json!({
@@ -68,7 +68,7 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     }
 
     let b_count = req.polyhedron.b.len();
-    let row_count = req.polyhedron.A.shape.nrows;
+    let row_count = req.polyhedron.a.shape.nrows;
     if b_count != row_count {
         return Err(HttpResponse::UnprocessableEntity().json(
             serde_json::json!({
@@ -91,7 +91,7 @@ mod tests {
     fn make_valid_request() -> SolveRequest {
         SolveRequest {
             polyhedron: SparseLEIntegerPolyhedron {
-                A: ApiIntegerSparseMatrix {
+                a: ApiIntegerSparseMatrix {
                     rows: vec![0, 1, 2],
                     cols: vec![0, 1, 2],
                     vals: vec![1, 2, 3],
