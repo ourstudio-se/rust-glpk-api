@@ -135,10 +135,10 @@ impl SolveRequestBuilder {
     /// use glpk_api_sdk::SolveRequestBuilder;
     ///
     /// let builder = SolveRequestBuilder::new()
-    ///     .set_constraint_rhs(vec![10, 20, 30]);
+    ///     .set_b_vector(vec![10, 20, 30]);
     /// ```
-    pub fn set_constraint_rhs(mut self, b: Vec<i32>) -> Self {
-        self.b = b;
+    pub fn set_b_vector(mut self, b_vector: Vec<i32>) -> Self {
+        self.b = b_vector;
         self
     }
 
