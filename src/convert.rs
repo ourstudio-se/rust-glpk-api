@@ -8,21 +8,12 @@ use glpk_rust::{
     Status as GlpkStatus, Variable as GlpkVar,
 };
 
-pub fn to_many_borrowed_objectives(objectives: &Vec<ObjectiveOwned>) -> Vec<HashMap<&str, f64>> {
-    let mut borrowed_objectives: Vec<HashMap<&str, f64>> = Vec::with_capacity(objectives.len());
-    for obj in objectives {
-        let borrowed_obj = to_borrowed_objective(obj);
-        borrowed_objectives.push(borrowed_obj);
-    }
-    borrowed_objectives
+pub fn to_many_borrowed_objectives(objectives: &[ObjectiveOwned]) -> Vec<HashMap<&str, f64>> {
+    objectives.iter().map(to_borrowed_objective).collect()
 }
 
-pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
-    let mut borrowed_obj: HashMap<&str, f64> = HashMap::with_capacity(obj.len());
-    for (k, v) in obj {
-        borrowed_obj.insert(k.as_str(), *v);
-    }
-    borrowed_obj
+fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
+    obj.iter().map(|(k, v)| (k.as_str(), *v)).collect()
 }
 
 /// Convert an API LE polyhedron to a GLPK LE polyhedron by building borrowed variables.
