@@ -12,7 +12,7 @@ pub fn to_many_borrowed_objectives(objectives: &[ObjectiveOwned]) -> Vec<HashMap
     objectives.iter().map(to_borrowed_objective).collect()
 }
 
-fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
+pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
     obj.iter().map(|(k, v)| (k.as_str(), *v)).collect()
 }
 
