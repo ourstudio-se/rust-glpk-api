@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::domain::validate::{validate_objectives, SolveInputError};
+use crate::domain::validate::{validate_objectives_owned, SolveInputError};
 
 use glpk_rust::{solve_ilps as glpk_solve_ilps, Solution, SparseLEIntegerPolyhedron as GlpkPoly};
 
@@ -11,7 +11,19 @@ pub fn solve(
     objectives: Vec<HashMap<&str, f64>>,
     maximize: bool,
 ) -> Result<Vec<Solution>, SolveInputError> {
-    match validate_objectives(&polyhedron.variables, &objectives) {
+    // Convert objectives to Vec<HashMap<String, f64>>
+    let objectives_owned: Vec<HashMap<String, f64>> = objectives
+        .clone()
+        .iter()
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect()
+        })
+        .collect();
+
+    // Validate objectives
+    match validate_objectives_owned(&polyhedron.variables, &objectives_owned) {
         Ok(_) => (),
         Err(error) => return Err(error),
     }

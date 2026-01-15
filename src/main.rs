@@ -2,10 +2,10 @@ mod convert;
 mod domain;
 mod models;
 
-use models::{ApiSolution, SolveRequest, SolverDirection};
+use models::{ApiSolution, SolveRequest};
 
-use convert::to_many_borrowed_objectives;
-use domain::solve::solve as solve_inner;
+use domain::solver::Solver;
+use domain::solver_factory::{create_solver, SolverType};
 
 use actix_web::body::BoxBody;
 use actix_web::http::header::HeaderName;
@@ -19,39 +19,30 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use dotenv::dotenv;
 use std::env;
 
-// ── Bring in the library types and alias the solver function to avoid name clash
-use glpk_rust::Solution;
-
-use crate::convert::to_glpk_polyhedron;
-
 // ---------- Route handlers ----------
 
 /// POST /solve
-pub async fn solve(req: web::Json<SolveRequest>) -> impl Responder {
+pub async fn solve(
+    req: web::Json<SolveRequest>,
+    solver: web::Data<Box<dyn Solver>>,
+) -> impl Responder {
     match validate_solve_request(&req) {
         Ok(_) => (),
         Err(response) => return response,
     }
 
-    let glpk_polyhedron = to_glpk_polyhedron(&req.polyhedron);
-    let borrowed_objectives = to_many_borrowed_objectives(&req.objectives);
-    let maximize = req.direction == SolverDirection::Maximize;
+    // Use the solver abstraction
+    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction);
 
-    // Call the library solver
-    let solve_result = solve_inner(glpk_polyhedron, borrowed_objectives, maximize);
-
-    let lib_solutions: Vec<Solution>;
+    let api_solutions: Vec<ApiSolution>;
     match solve_result {
-        Ok(solutions) => lib_solutions = solutions,
+        Ok(solutions) => api_solutions = solutions,
         Err(error) => {
             return HttpResponse::UnprocessableEntity().json(serde_json::json!({
                 "error": error.details,
             }))
         }
     }
-
-    // Map library solutions → API solutions with owned Strings
-    let api_solutions: Vec<ApiSolution> = lib_solutions.into_iter().map(|s| s.into()).collect();
 
     HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
 }
@@ -86,7 +77,7 @@ mod tests {
     use actix_web::http::StatusCode;
     use std::collections::HashMap;
 
-    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron};
+    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron, SolverDirection};
 
     fn make_valid_request() -> SolveRequest {
         SolveRequest {
@@ -243,14 +234,28 @@ async fn main() -> std::io::Result<()> {
         String::new()
     };
 
+    // Select solver based on environment variable (default: GLPK)
+    let solver_type = env::var("SOLVER")
+        .ok()
+        .and_then(|s| SolverType::from_str(&s))
+        .unwrap_or(SolverType::Glpk);
+
+    let solver = create_solver(solver_type);
+
     println!(
         "Server is {}",
         if protect { "protected" } else { "unprotected" }
     );
+    println!("Using solver: {}", solver.name());
     println!("Starting server on http://127.0.0.1:{}", port);
+
+    // Clone solver for use in the closure
+    let solver_data = web::Data::new(solver);
+
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
+            .app_data(solver_data.clone())
             .app_data(
                 web::JsonConfig::default()
                     .limit(json_limit)
