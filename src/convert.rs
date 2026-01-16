@@ -8,10 +8,6 @@ use glpk_rust::{
     Status as GlpkStatus, Variable as GlpkVar,
 };
 
-pub fn to_many_borrowed_objectives(objectives: &[ObjectiveOwned]) -> Vec<HashMap<&str, f64>> {
-    objectives.iter().map(to_borrowed_objective).collect()
-}
-
 pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
     obj.iter().map(|(k, v)| (k.as_str(), *v)).collect()
 }
