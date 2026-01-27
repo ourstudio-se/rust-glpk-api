@@ -37,10 +37,11 @@ jobs:
     name: Do security audit
     runs-on: ubuntu-24.04
     steps:
-      - name: Run cargo audit
-        uses: simonhyll/cargo-audit@v1
-        with:
-          fix: false
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Audit Rust Dependencies
+        uses: actions-rust-lang/audit@v1
 
   scan:
     name: Scan Docker image
