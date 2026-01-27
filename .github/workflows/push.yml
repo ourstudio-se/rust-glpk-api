@@ -37,8 +37,10 @@ jobs:
     name: Do security audit
     runs-on: ubuntu-24.04
     steps:
-      - name: Run cargo audit fix
+      - name: Run cargo audit
         uses: simonhyll/cargo-audit@v1
+        with:
+          fix: false
 
   scan:
     name: Scan Docker image
