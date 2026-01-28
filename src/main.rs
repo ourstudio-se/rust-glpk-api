@@ -20,6 +20,7 @@ use dotenv::dotenv;
 use std::env;
 
 use sentry_actix::Sentry;
+use std::sync::Arc;
 
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::Solution;
@@ -168,11 +169,6 @@ pub async fn root_redirect() -> impl Responder {
         .finish()
 }
 
-/// GET /panic - Test endpoint to trigger a panic for Sentry testing
-pub async fn test_panic() -> Result<HttpResponse<BoxBody>, Error> {
-    panic!("Test panic for Sentry!")
-}
-
 // Middleware
 static X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
@@ -230,6 +226,8 @@ fn init_sentry() -> sentry::ClientInitGuard {
         .expect("SENTRY_DSN not found");
     let environment = env::var("SENTRY_ENVIRONMENT")
         .expect("SENTRY_ENVIRONMENT not found");
+    let service_name = env::var("SENTRY_SERVICE_NAME")
+        .expect("SENTRY_SERVICE_NAME not found");
 
     println!("Initializing Sentry with environment: {}", environment);
 
@@ -238,6 +236,15 @@ fn init_sentry() -> sentry::ClientInitGuard {
         sentry::ClientOptions {
             environment: Some(environment.into()),
             attach_stacktrace: true,
+            before_send: Some(Arc::new(move |mut event| {
+                event.tags.insert("service".into(), service_name.clone());
+
+                // The tag `caas: true` is used to differentiate between
+                // caas and non-caas events
+                event.tags.insert("caas".into(), "true".into());
+                
+                Some(event)
+            })),
             ..Default::default()
         },
     ))
@@ -309,7 +316,6 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(root_redirect))
             .route("/health", web::get().to(health_check))
             .route("/docs", web::get().to(docs))
-            .route("/panic", web::get().to(test_panic))
             .service(
                 web::scope("")
                     .wrap(Condition::new(protect, from_fn(token_auth)))
