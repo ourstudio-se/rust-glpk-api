@@ -18,7 +18,7 @@ ARG APP_NAME
 ARG GLPK_VER
 WORKDIR /app
 
-RUN apk add --no-cache clang lld musl-dev git curl make pkgconf openssl-dev
+RUN apk add --no-cache clang lld musl-dev git curl make pkgconf
 RUN apk add --no-cache glpk-dev gmp-dev
 
 # Create glpk.pc file manually because it's not included by default in alpine
