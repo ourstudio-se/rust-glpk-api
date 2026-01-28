@@ -222,12 +222,9 @@ async fn token_auth(
 }
 
 fn init_sentry() -> sentry::ClientInitGuard {
-    let dsn = env::var("SENTRY_DSN")
-        .expect("SENTRY_DSN not found");
-    let environment = env::var("SENTRY_ENVIRONMENT")
-        .expect("SENTRY_ENVIRONMENT not found");
-    let service_name = env::var("SENTRY_SERVICE_NAME")
-        .expect("SENTRY_SERVICE_NAME not found");
+    let dsn = env::var("SENTRY_DSN").expect("SENTRY_DSN not found");
+    let environment = env::var("SENTRY_ENVIRONMENT").expect("SENTRY_ENVIRONMENT not found");
+    let service_name = env::var("SENTRY_SERVICE_NAME").expect("SENTRY_SERVICE_NAME not found");
 
     println!("Initializing Sentry with environment: {}", environment);
 
@@ -242,7 +239,7 @@ fn init_sentry() -> sentry::ClientInitGuard {
                 // The tag `caas: true` is used to differentiate between
                 // caas and non-caas events
                 event.tags.insert("caas".into(), "true".into());
-                
+
                 Some(event)
             })),
             ..Default::default()
@@ -274,7 +271,6 @@ async fn main() -> std::io::Result<()> {
     } else {
         String::new()
     };
-
 
     let use_sentry = env::var("USE_SENTRY")
         .ok()
