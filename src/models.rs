@@ -48,7 +48,7 @@ pub struct ApiIntegerSparseMatrix {
     pub shape: ApiShape,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum SolverDirection {
     Maximize,
