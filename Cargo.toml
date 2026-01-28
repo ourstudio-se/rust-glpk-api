@@ -10,6 +10,8 @@ serde_json = "1.0"
 dotenv = "0.15.0"
 env_logger = "0.11.8"
 glpk-rust = "0.1.12"
+sentry = "0.34"
+sentry-actix = "0.34"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }

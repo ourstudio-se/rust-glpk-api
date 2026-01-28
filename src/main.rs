@@ -19,6 +19,8 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use dotenv::dotenv;
 use std::env;
 
+use sentry_actix::Sentry;
+
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::Solution;
 
@@ -166,6 +168,11 @@ pub async fn root_redirect() -> impl Responder {
         .finish()
 }
 
+/// GET /panic - Test endpoint to trigger a panic for Sentry testing
+pub async fn test_panic() -> Result<HttpResponse<BoxBody>, Error> {
+    panic!("Test panic for Sentry!")
+}
+
 // Middleware
 static X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
@@ -218,6 +225,24 @@ async fn token_auth(
     Ok(req.into_response(forbidden_error()))
 }
 
+fn init_sentry() -> sentry::ClientInitGuard {
+    let dsn = env::var("SENTRY_DSN")
+        .expect("SENTRY_DSN not found");
+    let environment = env::var("SENTRY_ENVIRONMENT")
+        .expect("SENTRY_ENVIRONMENT not found");
+
+    println!("Initializing Sentry with environment: {}", environment);
+
+    sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            environment: Some(environment.into()),
+            attach_stacktrace: true,
+            ..Default::default()
+        },
+    ))
+}
+
 // ---------- Server bootstrap ----------
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -243,6 +268,19 @@ async fn main() -> std::io::Result<()> {
         String::new()
     };
 
+
+    let use_sentry = env::var("USE_SENTRY")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    // Guard must be kept in scope until the server exits
+    let _sentry_guard = if use_sentry {
+        Some(init_sentry())
+    } else {
+        None
+    };
+
     println!(
         "Server is {}",
         if protect { "protected" } else { "unprotected" }
@@ -251,6 +289,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
+            .wrap(Condition::new(use_sentry, Sentry::new()))
             .app_data(
                 web::JsonConfig::default()
                     .limit(json_limit)
@@ -270,6 +309,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(root_redirect))
             .route("/health", web::get().to(health_check))
             .route("/docs", web::get().to(docs))
+            .route("/panic", web::get().to(test_panic))
             .service(
                 web::scope("")
                     .wrap(Condition::new(protect, from_fn(token_auth)))
