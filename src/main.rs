@@ -19,6 +19,9 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use dotenv::dotenv;
 use std::env;
 
+use sentry_actix::Sentry;
+use std::sync::Arc;
+
 // ── Bring in the library types and alias the solver function to avoid name clash
 use glpk_rust::Solution;
 
@@ -218,6 +221,32 @@ async fn token_auth(
     Ok(req.into_response(forbidden_error()))
 }
 
+fn init_sentry() -> sentry::ClientInitGuard {
+    let dsn = env::var("SENTRY_DSN").expect("SENTRY_DSN not found");
+    let environment = env::var("SENTRY_ENVIRONMENT").expect("SENTRY_ENVIRONMENT not found");
+    let service_name = env::var("SENTRY_SERVICE_NAME").expect("SENTRY_SERVICE_NAME not found");
+
+    println!("Initializing Sentry with environment: {}", environment);
+
+    sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            environment: Some(environment.into()),
+            attach_stacktrace: true,
+            before_send: Some(Arc::new(move |mut event| {
+                event.tags.insert("service".into(), service_name.clone());
+
+                // The tag `caas: true` is used to differentiate between
+                // caas and non-caas events
+                event.tags.insert("caas".into(), "true".into());
+
+                Some(event)
+            })),
+            ..Default::default()
+        },
+    ))
+}
+
 // ---------- Server bootstrap ----------
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -243,6 +272,18 @@ async fn main() -> std::io::Result<()> {
         String::new()
     };
 
+    let use_sentry = env::var("USE_SENTRY")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    // Guard must be kept in scope until the server exits
+    let _sentry_guard = if use_sentry {
+        Some(init_sentry())
+    } else {
+        None
+    };
+
     println!(
         "Server is {}",
         if protect { "protected" } else { "unprotected" }
@@ -251,6 +292,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
+            .wrap(Condition::new(use_sentry, Sentry::new()))
             .app_data(
                 web::JsonConfig::default()
                     .limit(json_limit)
