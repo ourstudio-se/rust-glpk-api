@@ -10,6 +10,7 @@ pub trait Solver: Send + Sync {
     /// * `polyhedron` - The constraint polyhedron (Ax <= b with variable bounds)
     /// * `objectives` - List of objective functions to optimize
     /// * `direction` - Maximize or Minimize
+    /// * `use_presolve` - Enable/disable presolve optimization
     ///
     /// # Returns
     /// A vector of solutions, one for each objective function
@@ -18,6 +19,7 @@ pub trait Solver: Send + Sync {
         polyhedron: &SparseLEIntegerPolyhedron,
         objectives: &[HashMap<String, f64>],
         direction: SolverDirection,
+        use_presolve: bool,
     ) -> Result<Vec<ApiSolution>, SolveInputError>;
 
     /// Get the solver name for logging/debugging

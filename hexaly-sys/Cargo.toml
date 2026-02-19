@@ -1,0 +1,16 @@
+[package]
+name = "hexaly-sys"
+version = "0.1.0"
+edition = "2021"
+description = "FFI bindings to Hexaly (LocalSolver) optimization library"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.70"
+cc = "1.0"
+
+[lib]
+name = "hexaly_sys"
+path = "src/lib.rs"

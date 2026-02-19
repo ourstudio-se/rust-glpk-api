@@ -1,6 +1,6 @@
 # Linear Programming Rust API
 
-A REST API for solving linear programming problems with support for multiple solver backends (GLPK and HiGHS).
+A REST API for solving linear programming problems with support for multiple solver backends (GLPK, HiGHS, Gurobi, and Hexaly).
 
 ## 🚀 Quick Start
 
@@ -12,19 +12,58 @@ cargo run
 
 # Using HiGHS (requires cmake and feature flag)
 SOLVER=highs cargo run --features highs-solver
+
+# Using Gurobi (requires Gurobi installation and feature flag)
+GUROBI_HOME=/path/to/gurobi SOLVER=gurobi cargo run --features gurobi-solver
 ```
 
 Your application will be available at http://localhost:9000.
 
-### Using Docker
+### Using Docker Compose
+
+**Quick Start - Run all solvers on macOS:**
 
 ```bash
-docker compose up --build
+# One command to start everything (recommended)
+./run-all-solvers.sh
+```
+
+This script will:
+- Start GLPK and HiGHS in Docker (ports 9000-9001)
+- Start Gurobi natively on macOS (port 9002)
+
+**Manual Docker Compose (GLPK + HiGHS only):**
+
+```bash
+cd deploy
+docker compose up -d
+```
+
+This will start:
+- **GLPK solver** on `http://localhost:9000`
+- **HiGHS solver** on `http://localhost:9001`
+
+**Running Gurobi separately on macOS:**
+
+```bash
+# Gurobi must run natively (Docker can't use macOS Gurobi binaries)
+PORT=9002 \
+GUROBI_HOME=/Library/gurobi1301/macos_universal2 \
+SOLVER=gurobi \
+cargo run --features gurobi-solver
+```
+
+**Test the solvers:**
+
+```bash
+curl http://localhost:9000/health  # GLPK
+curl http://localhost:9001/health  # HiGHS
+curl http://localhost:9002/health  # Gurobi
 ```
 
 ## 🔧 Multi-Solver Support
 
-This API supports multiple LP/ILP solver backends through a clean abstraction layer. You can easily switch between GLPK and HiGHS without changing your API or client code.
+This API supports multiple LP/ILP solver backends through a clean abstraction layer. You can easily switch between GLPK, HiGHS, and Gurobi without changing your API or client code.
 
 ### Available Solvers
 
@@ -36,10 +75,37 @@ This API supports multiple LP/ILP solver backends through a clean abstraction la
 #### HiGHS
 - **Status**: ⚠️ Optional feature (requires cmake)
 - **Features**: Modern, faster for many problems, actively developed
-- **Configuration**: Presolve is disabled for consistency with GLPK behavior
+- **Configuration**: Presolve can be controlled via `USE_PRESOLVE` environment variable (default: enabled)
 - **Requirements**:
   - `cmake` must be installed
   - Enable the `highs-solver` feature flag
+
+#### Gurobi
+- **Status**: ⚠️ Optional feature (requires Gurobi license)
+- **Features**: Commercial solver, highly optimized, excellent performance on large problems
+- **Configuration**:
+  - Console output is disabled by default for production performance
+  - Automatically uses all available CPU cores for parallel optimization
+  - Binary variables (bounds [0,1]) are automatically detected and optimized
+  - Presolve can be controlled via `USE_PRESOLVE` environment variable (default: enabled)
+- **Requirements**:
+  - Gurobi must be installed locally (version 10-12 supported)
+  - Valid Gurobi license
+  - `GUROBI_HOME` environment variable set
+  - Enable the `gurobi-solver` feature flag
+
+#### Hexaly (LocalSolver)
+- **Status**: ⚠️ Optional feature (requires Hexaly license and manual FFI setup)
+- **Features**: Commercial solver with local search algorithms, handles non-linear problems, excellent for combinatorial optimization
+- **Configuration**:
+  - Console output is disabled by default
+  - Time limits and thread count can be configured in the solver code
+- **Requirements**:
+  - Hexaly must be installed locally
+  - Valid Hexaly license
+  - `HEXALY_HOME` or `LOCALSOLVER_HOME` environment variable set
+  - Enable the `hexaly-solver` feature flag
+  - **Note**: Uses custom FFI bindings (see [hexaly/README.md](hexaly/README.md) for detailed setup)
 
 ### Switching Solvers
 
@@ -51,6 +117,12 @@ SOLVER=glpk cargo run
 
 # Use HiGHS (requires cmake and feature flag)
 SOLVER=highs cargo run --features highs-solver
+
+# Use Gurobi (requires Gurobi installation and feature flag)
+GUROBI_HOME=/Library/gurobi1301/macos_universal2 SOLVER=gurobi cargo run --features gurobi-solver
+
+# Use Hexaly (requires Hexaly installation and feature flag)
+HEXALY_HOME=/path/to/hexaly SOLVER=hexaly cargo run --features hexaly-solver
 ```
 
 If `SOLVER` is not set, GLPK is used by default.
@@ -84,6 +156,84 @@ cargo test --features highs-solver
 SOLVER=highs cargo run --release --features highs-solver
 ```
 
+### Building with Hexaly Support
+
+#### Prerequisites
+
+1. **Install Hexaly**:
+   - Download from [Hexaly Downloads](https://www.hexaly.com/)
+   - Follow the installation instructions for your platform
+   - Obtain a valid license (free academic licenses available)
+
+2. **Set HEXALY_HOME**:
+   ```bash
+   # macOS (example for version 13.0)
+   export HEXALY_HOME=/Applications/hexaly_13_0
+
+   # Linux
+   export HEXALY_HOME=/opt/hexaly_13_0
+   ```
+
+   Add this to your shell profile (`.bashrc`, `.zshrc`, etc.) to make it permanent.
+
+3. **Run setup script** (optional but recommended):
+   ```bash
+   ./setup-hexaly.sh
+   ```
+
+   This script will verify your installation and configure the build environment.
+
+#### Build Commands
+
+```bash
+# Build with Hexaly support
+HEXALY_HOME=/path/to/hexaly cargo build --features hexaly-solver
+
+# Run tests with Hexaly
+HEXALY_HOME=/path/to/hexaly cargo test --features hexaly-solver
+
+# Run in production with Hexaly
+HEXALY_HOME=/path/to/hexaly SOLVER=hexaly cargo run --release --features hexaly-solver
+```
+
+For detailed FFI setup, troubleshooting, and architecture information, see **[hexaly/README.md](hexaly/README.md)**.
+
+### Building with Gurobi Support
+
+#### Prerequisites
+
+1. **Install Gurobi**:
+   - Download from [Gurobi Downloads](https://www.gurobi.com/downloads/)
+   - Follow the installation instructions for your platform
+   - Obtain a valid license (free academic licenses available)
+
+2. **Set GUROBI_HOME**:
+   ```bash
+   # macOS (example for version 13.0.1)
+   export GUROBI_HOME=/Library/gurobi1301/macos_universal2
+
+   # Linux (adjust version and path as needed)
+   export GUROBI_HOME=/opt/gurobi1301/linux64
+
+   # Windows
+   set GUROBI_HOME=C:\gurobi1301\win64
+   ```
+
+   Add this to your shell profile (`.bashrc`, `.zshrc`, etc.) to make it permanent.
+
+#### Build Commands
+
+```bash
+# Build with Gurobi support
+GUROBI_HOME=/path/to/gurobi cargo build --features gurobi-solver
+
+# Run tests with Gurobi
+GUROBI_HOME=/path/to/gurobi cargo test --features gurobi-solver
+
+# Run in production with Gurobi
+GUROBI_HOME=/path/to/gurobi SOLVER=gurobi cargo run --release --features gurobi-solver
+```
+
 ### Performance Comparison
 
 To compare solver performance on your workload:
@@ -93,7 +243,13 @@ To compare solver performance on your workload:
 time SOLVER=glpk ./target/release/rust-glpk
 
 # Test with HiGHS
-time SOLVER=highs ./target/release/rust-glpk --features highs-solver
+time SOLVER=highs ./target/release/rust-glpk
+
+# Test with Gurobi
+time GUROBI_HOME=/path/to/gurobi SOLVER=gurobi ./target/release/rust-glpk
+
+# Test with Hexaly
+time HEXALY_HOME=/path/to/hexaly SOLVER=hexaly ./target/release/rust-glpk
 ```
 
 ### API Compatibility
@@ -227,7 +383,10 @@ This standard formulation allows you to express a wide variety of optimization p
 
 - `PORT` - Server port (default: 9000)
 - `JSON_PAYLOAD_LIMIT` - Maximum request size (default: 2MB)
-- `SOLVER` - Solver backend: `glpk` (default) or `highs`
+- `SOLVER` - Solver backend: `glpk` (default), `highs`, `gurobi`, or `hexaly`
+- `GUROBI_HOME` - Path to Gurobi installation (required for Gurobi solver)
+- `HEXALY_HOME` - Path to Hexaly installation (required for Hexaly solver)
+- `USE_PRESOLVE` - Enable/disable presolve optimization: `true` (default) or `false`
 
 ### Using .env file
 
@@ -237,7 +396,34 @@ Create a `.env` file in the project root:
 PORT=8080
 JSON_PAYLOAD_LIMIT=5242880
 SOLVER=glpk
+USE_PRESOLVE=true
+# For Gurobi:
+# GUROBI_HOME=/Library/gurobi1301/macos_universal2
+# SOLVER=gurobi
 ```
+
+### ⚡ Presolve Configuration
+
+Presolve is an optimization technique that simplifies the problem before solving by:
+- Eliminating fixed variables
+- Removing redundant constraints
+- Tightening variable bounds
+- Reducing problem size
+
+**Benefits**: Faster solve times, especially for large problems
+**Tradeoff**: May eliminate fixed variables from solution (automatically handled by returning their fixed values)
+
+Control presolve with the `USE_PRESOLVE` environment variable:
+
+```bash
+# Enable presolve (default - recommended for production)
+USE_PRESOLVE=true cargo run
+
+# Disable presolve (useful for debugging or comparing results)
+USE_PRESOLVE=false cargo run
+```
+
+**Note**: GLPK uses its own presolve configuration internally and ignores this setting.
 
 ### 🛡️ Protected mode
 
@@ -250,33 +436,70 @@ When enabled, all requests to /solve must include a valid API key in a X-API-Key
 
 ## 🐳 Deploying with Docker
 
-### Build the image
+### Docker Compose (Recommended)
+
+The easiest way to run all solvers is with Docker Compose:
 
 ```bash
-# Build with GLPK (default)
-docker build -t glpk-api .
-
-# Build with HiGHS support
-docker build -t glpk-api --build-arg FEATURES=highs-solver .
+cd deploy
+docker compose up -d
 ```
 
-### Docker with HiGHS Example
+This starts three services:
+- **glpk-solver** on port 9000
+- **highs-solver** on port 9001
+- **gurobi-solver** on port 9002 (commented out by default, requires license)
 
-```dockerfile
-FROM rust:latest
+Access them at:
+```bash
+curl http://localhost:9000/health  # GLPK
+curl http://localhost:9001/health  # HiGHS
+curl http://localhost:9002/health  # Gurobi (if enabled)
+```
 
-# Install cmake for HiGHS
-RUN apt-get update && apt-get install -y cmake
+#### Enabling Gurobi in Docker
 
-WORKDIR /app
-COPY . .
+Gurobi requires additional setup due to licensing. See the detailed guide:
+- **[deploy/README-GUROBI.md](deploy/README-GUROBI.md)** - Complete Gurobi Docker setup instructions
+
+Quick steps:
+1. Copy your Gurobi installation to `deploy/gurobi/`
+2. Ensure your license file is accessible
+3. Uncomment the `gurobi-solver` service in `deploy/compose.yaml`
+4. Update the license file path in the volume mount
+5. Run `docker compose up gurobi-solver`
+
+### Building Individual Images
+
+You can also build individual Docker images:
+
+```bash
+# Build with GLPK (default) from deploy directory
+cd deploy
+docker build -f Dockerfile.multi -t glpk-api:glpk ..
 
 # Build with HiGHS support
-RUN cargo build --release --features highs-solver
+docker build -f Dockerfile.multi -t glpk-api:highs ..
 
-# Set solver at runtime
-ENV SOLVER=highs
-CMD ["./target/release/rust-glpk"]
+# Build with Gurobi (requires setup - see deploy/README-GUROBI.md)
+docker build -f Dockerfile.gurobi -t glpk-api:gurobi ..
+```
+
+Run individual containers:
+
+```bash
+# Run GLPK solver
+docker run -p 9000:9000 -e SOLVER=glpk glpk-api:glpk
+
+# Run HiGHS solver
+docker run -p 9001:9000 -e SOLVER=highs glpk-api:highs
+
+# Run Gurobi solver (requires license mount)
+docker run -p 9002:9000 \
+  -e SOLVER=gurobi \
+  -e GUROBI_HOME=/opt/gurobi \
+  -v ${HOME}/gurobi.lic:/opt/gurobi/gurobi.lic:ro \
+  glpk-api:gurobi
 ```
 
 ### For different CPU architecture
@@ -332,6 +555,9 @@ cargo test
 
 # Test with HiGHS
 cargo test --features highs-solver
+
+# Test with Gurobi
+GUROBI_HOME=/path/to/gurobi cargo test --features gurobi-solver
 ```
 
 Or test manually with the included script:
@@ -358,7 +584,7 @@ The API uses **sparse matrix format** for efficiency:
 
 ## 🔌 Adding New Solvers
 
-To add a new solver (e.g., COIN-OR, CPLEX, Gurobi):
+To add a new solver (e.g., COIN-OR, CPLEX):
 
 1. **Implement the Solver trait** in `src/domain/solvers/your_solver.rs`:
    ```rust
@@ -382,6 +608,7 @@ To add a new solver (e.g., COIN-OR, CPLEX, Gurobi):
    pub enum SolverType {
        Glpk,
        Highs,
+       Gurobi,
        YourSolver,  // Add here
    }
 
@@ -421,9 +648,41 @@ echo $SOLVER
 SOLVER=highs cargo run --features highs-solver
 ```
 
+### Gurobi linking errors
+If you get undefined symbols for Gurobi functions:
+1. Verify Gurobi is installed: `ls $GUROBI_HOME/lib/`
+2. Check that `GUROBI_HOME` points to the correct directory
+3. Ensure your Gurobi version is 10-12 (version 13+ may have compatibility issues with the current `grb` crate)
+4. Try setting the library path explicitly:
+   ```bash
+   export DYLD_LIBRARY_PATH=$GUROBI_HOME/lib:$DYLD_LIBRARY_PATH  # macOS
+   export LD_LIBRARY_PATH=$GUROBI_HOME/lib:$LD_LIBRARY_PATH      # Linux
+   ```
+
+### "Academic license - for non-commercial use only" error
+This is just an informational message from Gurobi and doesn't prevent the solver from working. If you need commercial use, upgrade your Gurobi license.
+
+### Enabling Gurobi debug logging
+By default, Gurobi's console output is disabled for better performance. To enable verbose logging for debugging:
+1. Edit `src/domain/solvers/gurobi_solver.rs`
+2. Change `env.set(param::OutputFlag, 0)` to `env.set(param::OutputFlag, 1)`
+3. Rebuild the project
+
+This will show detailed solver output including warnings about small coefficients, presolve statistics, and solution progress.
+
+### Controlling Gurobi thread usage
+By default, Gurobi uses all available CPU cores. To limit thread count:
+1. Edit `src/domain/solvers/gurobi_solver.rs`
+2. Change `env.set(param::Threads, 0)` to `env.set(param::Threads, N)` where N is your desired thread count
+3. Rebuild the project
+
+For example, setting `Threads` to 4 will use only 4 threads. Setting to 0 (default) uses all available cores automatically.
+
 ## ⚠️ Current Limitations
 
 - HiGHS requires `cmake` at build time
+- Gurobi requires a commercial or academic license
+- Gurobi version 13+ may not be fully supported yet (versions 10-12 recommended)
 - Only one solver can be active per server instance
 - Solver selection happens at server startup (not per-request)
 
@@ -432,4 +691,6 @@ SOLVER=highs cargo run --features highs-solver
 - [Docker's Rust guide](https://docs.docker.com/language/rust/)
 - [GLPK Documentation](https://www.gnu.org/software/glpk/)
 - [HiGHS Documentation](https://highs.dev/)
+- [Gurobi Documentation](https://www.gurobi.com/documentation/)
+- [Gurobi Rust Bindings (grb crate)](https://docs.rs/grb/)
 - [Linear Programming on Wikipedia](https://en.wikipedia.org/wiki/Linear_programming)
