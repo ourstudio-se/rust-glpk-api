@@ -4,12 +4,22 @@ use crate::domain::solvers::GlpkSolver;
 #[cfg(feature = "highs-solver")]
 use crate::domain::solvers::HighsSolver;
 
+#[cfg(feature = "gurobi-solver")]
+use crate::domain::solvers::GurobiSolver;
+
+#[cfg(feature = "hexaly-solver")]
+use crate::domain::solvers::HexalySolver;
+
 /// Available solver backends
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolverType {
     Glpk,
     #[cfg(feature = "highs-solver")]
     Highs,
+    #[cfg(feature = "gurobi-solver")]
+    Gurobi,
+    #[cfg(feature = "hexaly-solver")]
+    Hexaly,
 }
 
 impl SolverType {
@@ -19,6 +29,10 @@ impl SolverType {
             "glpk" => Some(SolverType::Glpk),
             #[cfg(feature = "highs-solver")]
             "highs" => Some(SolverType::Highs),
+            #[cfg(feature = "gurobi-solver")]
+            "gurobi" => Some(SolverType::Gurobi),
+            #[cfg(feature = "hexaly-solver")]
+            "hexaly" => Some(SolverType::Hexaly),
             _ => None,
         }
     }
@@ -30,6 +44,10 @@ pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
         SolverType::Glpk => Box::new(GlpkSolver::new()),
         #[cfg(feature = "highs-solver")]
         SolverType::Highs => Box::new(HighsSolver::new()),
+        #[cfg(feature = "gurobi-solver")]
+        SolverType::Gurobi => Box::new(GurobiSolver::new()),
+        #[cfg(feature = "hexaly-solver")]
+        SolverType::Hexaly => Box::new(HexalySolver::new()),
     }
 }
 
@@ -45,6 +63,14 @@ mod tests {
         assert_eq!(SolverType::from_str("highs"), Some(SolverType::Highs));
         #[cfg(feature = "highs-solver")]
         assert_eq!(SolverType::from_str("HiGHS"), Some(SolverType::Highs));
+        #[cfg(feature = "gurobi-solver")]
+        assert_eq!(SolverType::from_str("gurobi"), Some(SolverType::Gurobi));
+        #[cfg(feature = "gurobi-solver")]
+        assert_eq!(SolverType::from_str("Gurobi"), Some(SolverType::Gurobi));
+        #[cfg(feature = "hexaly-solver")]
+        assert_eq!(SolverType::from_str("hexaly"), Some(SolverType::Hexaly));
+        #[cfg(feature = "hexaly-solver")]
+        assert_eq!(SolverType::from_str("Hexaly"), Some(SolverType::Hexaly));
         assert_eq!(SolverType::from_str("unknown"), None);
     }
 
@@ -59,5 +85,19 @@ mod tests {
     fn test_create_highs_solver() {
         let solver = create_solver(SolverType::Highs);
         assert_eq!(solver.name(), "HiGHS");
+    }
+
+    #[cfg(feature = "gurobi-solver")]
+    #[test]
+    fn test_create_gurobi_solver() {
+        let solver = create_solver(SolverType::Gurobi);
+        assert_eq!(solver.name(), "Gurobi");
+    }
+
+    #[cfg(feature = "hexaly-solver")]
+    #[test]
+    fn test_create_hexaly_solver() {
+        let solver = create_solver(SolverType::Hexaly);
+        assert_eq!(solver.name(), "Hexaly");
     }
 }

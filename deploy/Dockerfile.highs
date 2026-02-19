@@ -1,0 +1,76 @@
+# syntax=docker/dockerfile:1
+
+ARG RUST_VERSION=1.86.0
+ARG APP_NAME=rust-glpk
+ARG GLPK_VER=5.0
+
+################################################################################
+# Create a stage for building the application.
+
+FROM rust:${RUST_VERSION}-slim-bookworm AS build
+ARG APP_NAME
+ARG GLPK_VER
+WORKDIR /app
+
+# Install build dependencies including C++ compiler and clang for bindgen
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libglpk-dev \
+    libgmp-dev \
+    cmake \
+    g++ \
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variable for HiGHS solver
+ENV SOLVER=highs
+
+# Viktigt för att kunna använda ${TARGETPLATFORM} i RUN
+ARG TARGETPLATFORM
+
+RUN --mount=type=bind,source=src,target=src \
+    --mount=type=bind,source=static,target=static \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,id=cargo-target-highs-${TARGETPLATFORM},target=/app/target/ \
+    --mount=type=cache,id=cargo-git-${TARGETPLATFORM},target=/usr/local/cargo/git/db \
+    --mount=type=cache,id=cargo-registry-${TARGETPLATFORM},target=/usr/local/cargo/registry/ \
+    cargo build --locked --release --features highs-solver && \
+    cp ./target/release/$APP_NAME /bin/server
+
+################################################################################
+# Create a new stage for running the application that contains the minimal
+# runtime dependencies for the application.
+
+FROM debian:bookworm-slim AS final
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgcc-s1 \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-privileged user that the app will run under.
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    appuser
+USER appuser
+
+# Copy the executable from the "build" stage.
+COPY --from=build /bin/server /bin/
+
+# Set environment variable for HiGHS solver
+ENV SOLVER=highs
+
+# Expose the port that the application listens on.
+EXPOSE 9001
+
+# What the container should run when it is started.
+CMD ["/bin/server"]

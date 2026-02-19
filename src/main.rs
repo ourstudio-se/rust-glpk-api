@@ -18,6 +18,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 
 use dotenv::dotenv;
 use std::env;
+use std::time::Instant;
 
 // ---------- Route handlers ----------
 
@@ -25,14 +26,24 @@ use std::env;
 pub async fn solve(
     req: web::Json<SolveRequest>,
     solver: web::Data<Box<dyn Solver>>,
+    use_presolve: web::Data<bool>,
 ) -> impl Responder {
     match validate_solve_request(&req) {
         Ok(_) => (),
         Err(response) => return response,
     }
 
-    // Use the solver abstraction
-    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction);
+    // Use the solver abstraction with timing
+    let start = Instant::now();
+    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction, **use_presolve);
+    let duration = start.elapsed();
+
+    println!("Solve time: {:.3}s ({} variables, {} constraints, {} objectives, presolve: {})",
+             duration.as_secs_f64(),
+             req.polyhedron.variables.len(),
+             req.polyhedron.a.shape.nrows,
+             req.objectives.len(),
+             if **use_presolve { "on" } else { "off" });
 
     let api_solutions: Vec<ApiSolution>;
     match solve_result {
@@ -240,6 +251,12 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| SolverType::from_str(&s))
         .unwrap_or(SolverType::Glpk);
 
+    // Configure presolve (default: true)
+    let use_presolve = env::var("USE_PRESOLVE")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(true);
+
     let solver = create_solver(solver_type);
 
     println!(
@@ -247,15 +264,18 @@ async fn main() -> std::io::Result<()> {
         if protect { "protected" } else { "unprotected" }
     );
     println!("Using solver: {}", solver.name());
+    println!("Presolve: {}", if use_presolve { "enabled" } else { "disabled" });
     println!("Starting server on http://127.0.0.1:{}", port);
 
-    // Clone solver for use in the closure
+    // Clone solver and presolve flag for use in the closure
     let solver_data = web::Data::new(solver);
+    let presolve_data = web::Data::new(use_presolve);
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
             .app_data(solver_data.clone())
+            .app_data(presolve_data.clone())
             .app_data(
                 web::JsonConfig::default()
                     .limit(json_limit)

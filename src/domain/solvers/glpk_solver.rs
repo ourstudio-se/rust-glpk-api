@@ -23,6 +23,7 @@ impl Solver for GlpkSolver {
         polyhedron: &SparseLEIntegerPolyhedron,
         objectives: &[HashMap<String, f64>],
         direction: SolverDirection,
+        _use_presolve: bool,
     ) -> Result<Vec<ApiSolution>, SolveInputError> {
         let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
 

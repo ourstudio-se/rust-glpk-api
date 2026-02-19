@@ -1,0 +1,96 @@
+# syntax=docker/dockerfile:1
+
+ARG RUST_VERSION=1.86.0
+ARG APP_NAME=rust-glpk
+ARG GUROBI_VERSION=13.0.1
+
+################################################################################
+# Create a stage for building the application with Gurobi support
+
+FROM rust:${RUST_VERSION}-slim-bookworm AS build
+ARG APP_NAME
+ARG GUROBI_VERSION
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libglpk-dev \
+    libgmp-dev \
+    cmake \
+    g++ \
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Gurobi will be mounted as a volume at runtime
+# We create the directory and expect it to be populated via bind mount
+ARG GUROBI_HOME=/opt/gurobi
+RUN mkdir -p ${GUROBI_HOME}
+
+# For build, we need to mount Gurobi temporarily
+# Use: docker build --mount=type=bind,source=/path/to/gurobi-linux,target=/opt/gurobi ...
+ENV GUROBI_HOME=${GUROBI_HOME}
+ENV LD_LIBRARY_PATH=${GUROBI_HOME}/lib:$LD_LIBRARY_PATH
+
+# Important for using ${TARGETPLATFORM} in RUN
+ARG TARGETPLATFORM
+
+# Build with Gurobi solver feature
+RUN --mount=type=bind,source=src,target=src \
+    --mount=type=bind,source=static,target=static \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,id=cargo-target-gurobi-${TARGETPLATFORM},target=/app/target/ \
+    --mount=type=cache,id=cargo-git-${TARGETPLATFORM},target=/usr/local/cargo/git/db \
+    --mount=type=cache,id=cargo-registry-${TARGETPLATFORM},target=/usr/local/cargo/registry/ \
+    cargo build --locked --release --features gurobi-solver && \
+    cp ./target/release/$APP_NAME /bin/server
+
+################################################################################
+# Create runtime stage with Gurobi
+
+FROM debian:bookworm-slim AS final
+ARG GUROBI_VERSION
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgcc-s1 \
+    libstdc++6 \
+    libglpk40 \
+    libgmp10 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Gurobi runtime libraries from build stage
+ARG GUROBI_HOME=/opt/gurobi
+COPY --from=build ${GUROBI_HOME}/lib ${GUROBI_HOME}/lib
+COPY --from=build ${GUROBI_HOME}/bin ${GUROBI_HOME}/bin
+
+# Set Gurobi environment variables for runtime
+ENV GUROBI_HOME=${GUROBI_HOME}
+ENV LD_LIBRARY_PATH=${GUROBI_HOME}/lib:$LD_LIBRARY_PATH
+ENV PATH=${GUROBI_HOME}/bin:$PATH
+
+# Create a non-privileged user
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    appuser
+USER appuser
+
+# Copy the executable from the "build" stage
+COPY --from=build /bin/server /bin/
+
+# Set solver to gurobi
+ENV SOLVER=gurobi
+
+# Expose the port that the application listens on
+EXPOSE 9000
+
+# What the container should run when it is started
+CMD ["/bin/server"]

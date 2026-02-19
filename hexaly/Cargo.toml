@@ -1,0 +1,13 @@
+[package]
+name = "hexaly"
+version = "0.1.0"
+edition = "2021"
+description = "Safe Rust bindings for Hexaly (LocalSolver) optimization library"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+hexaly-sys = { path = "../hexaly-sys" }
+
+[lib]
+name = "hexaly"
+path = "src/lib.rs"
