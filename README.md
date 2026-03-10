@@ -1,6 +1,6 @@
 # Linear Programming Rust API
 
-A REST API for solving linear programming problems with support for multiple solver backends (GLPK, HiGHS, Gurobi, and Hexaly).
+A REST API for solving linear programming problems with support for multiple solver backends (GLPK, HiGHS, and Gurobi).
 
 ## 🚀 Quick Start
 
@@ -94,19 +94,6 @@ This API supports multiple LP/ILP solver backends through a clean abstraction la
   - `GUROBI_HOME` environment variable set
   - Enable the `gurobi-solver` feature flag
 
-#### Hexaly (LocalSolver)
-- **Status**: ⚠️ Optional feature (requires Hexaly license and manual FFI setup)
-- **Features**: Commercial solver with local search algorithms, handles non-linear problems, excellent for combinatorial optimization
-- **Configuration**:
-  - Console output is disabled by default
-  - Time limits and thread count can be configured in the solver code
-- **Requirements**:
-  - Hexaly must be installed locally
-  - Valid Hexaly license
-  - `HEXALY_HOME` or `LOCALSOLVER_HOME` environment variable set
-  - Enable the `hexaly-solver` feature flag
-  - **Note**: Uses custom FFI bindings (see [hexaly/README.md](hexaly/README.md) for detailed setup)
-
 ### Switching Solvers
 
 Set the `SOLVER` environment variable to choose your solver:
@@ -120,9 +107,6 @@ SOLVER=highs cargo run --features highs-solver
 
 # Use Gurobi (requires Gurobi installation and feature flag)
 GUROBI_HOME=/Library/gurobi1301/macos_universal2 SOLVER=gurobi cargo run --features gurobi-solver
-
-# Use Hexaly (requires Hexaly installation and feature flag)
-HEXALY_HOME=/path/to/hexaly SOLVER=hexaly cargo run --features hexaly-solver
 ```
 
 If `SOLVER` is not set, GLPK is used by default.

@@ -22,14 +22,9 @@ use std::time::Instant;
 
 use sentry_actix::Sentry;
 use std::sync::Arc;
-
-// ── Bring in the library types and alias the solver function to avoid name clash
-use glpk_rust::Solution;
-
-use crate::convert::to_glpk_polyhedron;
+use subtle::ConstantTimeEq;
 
 // ---------- Route handlers ----------
-
 /// POST /solve
 pub async fn solve(
     req: web::Json<SolveRequest>,
@@ -43,7 +38,8 @@ pub async fn solve(
 
     // Use the solver abstraction with timing
     let start = Instant::now();
-    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction, **use_presolve);
+    let presolve = *use_presolve.as_ref();
+    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction, presolve);
     let duration = start.elapsed();
 
     println!("Solve time: {:.3}s ({} variables, {} constraints, {} objectives, presolve: {})",
@@ -51,7 +47,7 @@ pub async fn solve(
              req.polyhedron.variables.len(),
              req.polyhedron.a.shape.nrows,
              req.objectives.len(),
-             if **use_presolve { "on" } else { "off" });
+             if presolve { "on" } else { "off" });
 
     let api_solutions: Vec<ApiSolution>;
     match solve_result {
@@ -87,75 +83,70 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
         ));
     }
 
-    Ok(())
-}
+    // Validate sparse matrix arrays have same length
+    let rows_len = req.polyhedron.a.rows.len();
+    let cols_len = req.polyhedron.a.cols.len();
+    let vals_len = req.polyhedron.a.vals.len();
+    if rows_len != cols_len || rows_len != vals_len {
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Sparse matrix arrays must have same length: got rows={}, cols={}, vals={}", rows_len, cols_len, vals_len)
+            }),
+        ));
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use actix_web::http::StatusCode;
-    use std::collections::HashMap;
+    // Validate sparse matrix indices are within bounds
+    for i in 0..rows_len {
+        let row = req.polyhedron.a.rows[i];
+        let col = req.polyhedron.a.cols[i];
 
-    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron, SolverDirection};
+        if row < 0 || row >= row_count as i32 {
+            return Err(HttpResponse::UnprocessableEntity().json(
+                serde_json::json!({
+                    "error": format!("Row index {} at position {} is out of bounds [0, {})", row, i, row_count)
+                }),
+            ));
+        }
 
-    fn make_valid_request() -> SolveRequest {
-        SolveRequest {
-            polyhedron: SparseLEIntegerPolyhedron {
-                a: ApiIntegerSparseMatrix {
-                    rows: vec![0, 1, 2],
-                    cols: vec![0, 1, 2],
-                    vals: vec![1, 2, 3],
-                    shape: ApiShape { nrows: 3, ncols: 3 },
-                },
-                b: vec![10, 20, 30],
-                variables: vec![
-                    ApiVariable {
-                        id: "x1".into(),
-                        bound: (0, 100),
-                    },
-                    ApiVariable {
-                        id: "x2".into(),
-                        bound: (0, 100),
-                    },
-                    ApiVariable {
-                        id: "x3".into(),
-                        bound: (0, 100),
-                    },
-                ],
-            },
-            objectives: vec![{
-                let mut obj = HashMap::new();
-                obj.insert("x1".to_string(), 1.0);
-                obj.insert("x2".to_string(), 2.0);
-                obj
-            }],
-            direction: SolverDirection::Maximize,
+        if col < 0 || col >= column_count as i32 {
+            return Err(HttpResponse::UnprocessableEntity().json(
+                serde_json::json!({
+                    "error": format!("Column index {} at position {} is out of bounds [0, {})", col, i, column_count)
+                }),
+            ));
         }
     }
 
-    #[test]
-    fn validate_solve_request_valid_request() {
-        let req = make_valid_request();
-        assert!(validate_solve_request(&req).is_ok());
+    // Input size limits (prevent DoS/OOM)
+    const MAX_VARIABLES: usize = 100_000;
+    const MAX_CONSTRAINTS: usize = 100_000;
+    const MAX_NONZEROS: usize = 1_000_000;
+
+    if variable_count > MAX_VARIABLES {
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Too many variables: {} exceeds limit of {}", variable_count, MAX_VARIABLES)
+            }),
+        ));
     }
 
-    #[test]
-    fn validate_solve_request_mismatch_variables_vs_columns_should_return_422() {
-        let mut req = make_valid_request();
-        req.polyhedron.variables.pop();
-        let resp = validate_solve_request(&req).unwrap_err();
-        let status = resp.status();
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    if row_count > MAX_CONSTRAINTS {
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Too many constraints: {} exceeds limit of {}", row_count, MAX_CONSTRAINTS)
+            }),
+        ));
     }
 
-    #[test]
-    fn validate_solve_request_mismatch_b_vs_rows_should_return_422() {
-        let mut req = make_valid_request();
-        req.polyhedron.b.pop();
-        let resp = validate_solve_request(&req).unwrap_err();
-        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    if rows_len > MAX_NONZEROS {
+        return Err(HttpResponse::UnprocessableEntity().json(
+            serde_json::json!({
+                "error": format!("Too many non-zero elements: {} exceeds limit of {}", rows_len, MAX_NONZEROS)
+            }),
+        ));
     }
+
+    Ok(())
 }
 
 /// GET /health
@@ -218,7 +209,8 @@ async fn token_auth(
         return Ok(req.into_response(unauthorized_error()));
     };
 
-    let valid_token = auth.token == token;
+    // Use constant-time comparison to prevent timing attacks
+    let valid_token = auth.token.as_bytes().ct_eq(token.as_bytes()).into();
 
     if valid_token {
         let res = next.call(req).await?;
@@ -233,6 +225,9 @@ fn init_sentry() -> sentry::ClientInitGuard {
     let environment = env::var("SENTRY_ENVIRONMENT").expect("SENTRY_ENVIRONMENT not found");
     let service_name = env::var("SENTRY_SERVICE_NAME").expect("SENTRY_SERVICE_NAME not found");
 
+    // Optional CAAS tag (default: not set)
+    let caas_tag = env::var("SENTRY_CAAS_TAG").ok();
+
     println!("Initializing Sentry with environment: {}", environment);
 
     sentry::init((
@@ -243,9 +238,10 @@ fn init_sentry() -> sentry::ClientInitGuard {
             before_send: Some(Arc::new(move |mut event| {
                 event.tags.insert("service".into(), service_name.clone());
 
-                // The tag `caas: true` is used to differentiate between
-                // caas and non-caas events
-                event.tags.insert("caas".into(), "true".into());
+                // Add caas tag if configured
+                if let Some(ref caas_value) = caas_tag {
+                    event.tags.insert("caas".into(), caas_value.clone());
+                }
 
                 Some(event)
             })),
@@ -302,11 +298,11 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| s.parse::<bool>().ok())
         .unwrap_or(true);
 
-    // Configure model cache size (default: 100, 0 to disable)
+    // Configure model cache size (default: 0 disabled, set to enable)
     let cache_size = env::var("MODEL_CACHE_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(100);
+        .unwrap_or(0);
 
     let solver = create_solver_with_cache(solver_type, cache_size);
 
@@ -316,7 +312,11 @@ async fn main() -> std::io::Result<()> {
     );
     println!("Using solver: {}", solver.name());
     println!("Presolve: {}", if use_presolve { "enabled" } else { "disabled" });
-    println!("LRU Model builder cache: {} entries", if cache_size == 0 { "disabled".to_string() } else { cache_size.to_string() });
+    if cache_size == 0 {
+        println!("LRU Model builder cache: disabled");
+    } else {
+        println!("LRU Model builder cache: {} entries", cache_size);
+    }
     println!("Starting server on http://127.0.0.1:{}", port);
 
     // Clone solver and presolve flag for use in the closure
@@ -357,4 +357,71 @@ async fn main() -> std::io::Result<()> {
     .bind(("0.0.0.0", port))?
     .run()
     .await
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::StatusCode;
+    use std::collections::HashMap;
+
+    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron, SolverDirection};
+
+    fn make_valid_request() -> SolveRequest {
+        SolveRequest {
+            polyhedron: SparseLEIntegerPolyhedron {
+                a: ApiIntegerSparseMatrix {
+                    rows: vec![0, 1, 2],
+                    cols: vec![0, 1, 2],
+                    vals: vec![1, 2, 3],
+                    shape: ApiShape { nrows: 3, ncols: 3 },
+                },
+                b: vec![10, 20, 30],
+                variables: vec![
+                    ApiVariable {
+                        id: "x1".into(),
+                        bound: (0, 100),
+                    },
+                    ApiVariable {
+                        id: "x2".into(),
+                        bound: (0, 100),
+                    },
+                    ApiVariable {
+                        id: "x3".into(),
+                        bound: (0, 100),
+                    },
+                ],
+            },
+            objectives: vec![{
+                let mut obj = HashMap::new();
+                obj.insert("x1".to_string(), 1.0);
+                obj.insert("x2".to_string(), 2.0);
+                obj
+            }],
+            direction: SolverDirection::Maximize,
+        }
+    }
+
+    #[test]
+    fn validate_solve_request_valid_request() {
+        let req = make_valid_request();
+        assert!(validate_solve_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_solve_request_mismatch_variables_vs_columns_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.variables.pop();
+        let resp = validate_solve_request(&req).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn validate_solve_request_mismatch_b_vs_rows_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.b.pop();
+        let resp = validate_solve_request(&req).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }

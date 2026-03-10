@@ -9,10 +9,24 @@ use glpk_rust::{solve_ilps as glpk_solve_ilps, Solution};
 const NO_TERMINAL_OUTPUT: bool = false;
 
 /// GLPK solver implementation
+///
+/// Note: GLPK does not support model caching due to its mutable API design.
+/// The cache_size parameter is accepted for API consistency but has no effect.
 pub struct GlpkSolver;
 
 impl GlpkSolver {
     pub fn new() -> Self {
+        GlpkSolver
+    }
+
+    /// Create a new GLPK solver with specified cache size
+    /// Note: Cache is not supported for GLPK, parameter ignored
+    pub fn with_cache_size(_size: usize) -> Self {
+        GlpkSolver
+    }
+
+    /// Create solver with caching disabled (same as default for GLPK)
+    pub fn without_cache() -> Self {
         GlpkSolver
     }
 }
@@ -46,6 +60,7 @@ impl Solver for GlpkSolver {
             &mut mut_polyhedron,
             borrowed_objectives,
             maximize,
+            _use_presolve,
             NO_TERMINAL_OUTPUT,
         );
 

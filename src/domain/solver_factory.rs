@@ -33,15 +33,18 @@ impl SolverType {
 
 /// Create a solver instance based on the specified type
 pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
-    create_solver_with_cache(solver_type, 100)
+    create_solver_with_cache(solver_type, 0) // Default to no cache
 }
 
 /// Create a solver instance with specified cache size
 pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> Box<dyn Solver> {
     match solver_type {
         SolverType::Glpk => {
-            let _ = cache_size; // Cache not supported for GLPK
-            Box::new(GlpkSolver::new())
+            if cache_size == 0 {
+                Box::new(GlpkSolver::without_cache())
+            } else {
+                Box::new(GlpkSolver::with_cache_size(cache_size))
+            }
         },
         #[cfg(feature = "highs-solver")]
         SolverType::Highs => {
@@ -53,8 +56,11 @@ pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> B
         },
         #[cfg(feature = "gurobi-solver")]
         SolverType::Gurobi => {
-            let _ = cache_size; // Cache not supported for Gurobi
-            Box::new(GurobiSolver::new())
+            if cache_size == 0 {
+                Box::new(GurobiSolver::without_cache())
+            } else {
+                Box::new(GurobiSolver::with_cache_size(cache_size))
+            }
         },
     }
 }

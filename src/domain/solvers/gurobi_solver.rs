@@ -1,17 +1,59 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveInputError};
 use crate::models::{ApiSolution, SparseLEIntegerPolyhedron, SolverDirection, Status};
 use crate::convert::to_glpk_polyhedron;
 
 use grb::prelude::*;
+use lru::LruCache;
+use parking_lot::Mutex;
+use std::num::NonZeroUsize;
 
-/// Gurobi solver implementation
-pub struct GurobiSolver;
+/// Cached Gurobi model structure
+struct CachedGurobiModel {
+    model: Model,
+    vars: Vec<Var>,
+    n_vars: usize,
+}
+
+// SAFETY: Gurobi model is properly synchronized through Arc and Mutex
+// Each model instance is only accessed by one thread at a time
+unsafe impl Send for CachedGurobiModel {}
+unsafe impl Sync for CachedGurobiModel {}
+
+/// Gurobi solver implementation with model caching
+///
+/// This implementation includes model caching:
+/// - Models are cached based on polyhedron hash
+/// - LRU eviction policy when cache is full
+/// - Reuses cached models across multiple objectives
+/// - Thread-safe via parking_lot::Mutex
+pub struct GurobiSolver {
+    model_cache: Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<CachedGurobiModel>>>>>,
+    cache_enabled: bool,
+}
 
 impl GurobiSolver {
     pub fn new() -> Self {
-        GurobiSolver
+        Self::with_cache_size(100)
+    }
+
+    /// Create a new Gurobi solver with specified cache size
+    pub fn with_cache_size(size: usize) -> Self {
+        let cache_size = NonZeroUsize::new(size).unwrap_or(NonZeroUsize::new(100).unwrap());
+        GurobiSolver {
+            model_cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+            cache_enabled: size > 0,
+        }
+    }
+
+    /// Create solver with caching disabled
+    pub fn without_cache() -> Self {
+        GurobiSolver {
+            model_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
+            cache_enabled: false,
+        }
     }
 
     /// Convert Gurobi status to our API status
@@ -23,41 +65,23 @@ impl GurobiSolver {
             _ => Status::Undefined,
         }
     }
-}
 
-impl Solver for GurobiSolver {
-    fn solve(
-        &self,
+    /// Build a new Gurobi model for the given polyhedron
+    fn build_model(
         polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
-        direction: SolverDirection,
         use_presolve: bool,
-    ) -> std::result::Result<Vec<ApiSolution>, SolveInputError> {
-        // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
-
-        let sense = match direction {
-            SolverDirection::Maximize => ModelSense::Maximize,
-            SolverDirection::Minimize => ModelSense::Minimize,
-        };
-
-        let mut solutions = Vec::new();
-
-        // Create Gurobi environment once
+    ) -> Result<Arc<Mutex<CachedGurobiModel>>, SolveInputError> {
+        // Create Gurobi environment
         let mut env = Env::new("").map_err(|e| SolveInputError {
             details: format!("Failed to create Gurobi environment: {}", e),
         })?;
 
-        // Disable Gurobi console output for production use
-        // Set to 1 to enable verbose logging for debugging
+        // Disable Gurobi console output
         env.set(param::OutputFlag, 0).map_err(|e| SolveInputError {
             details: format!("Failed to set Gurobi output flag: {}", e),
         })?;
 
-        // Use all available threads for parallel solving
-        // Gurobi will automatically use all CPU cores (default is 0 = automatic)
-        // You can set to a specific number to limit threads, e.g., env.set(param::Threads, 4)
+        // Use all available threads
         env.set(param::Threads, 0).map_err(|e| SolveInputError {
             details: format!("Failed to set Gurobi thread count: {}", e),
         })?;
@@ -67,7 +91,7 @@ impl Solver for GurobiSolver {
             details: format!("Failed to set Gurobi presolve: {}", e),
         })?;
 
-        // Create a single Gurobi model (reuse across objectives)
+        // Create a Gurobi model
         let mut model = Model::with_env("optimization", &env).map_err(|e| SolveInputError {
             details: format!("Failed to create Gurobi model: {}", e),
         })?;
@@ -77,8 +101,7 @@ impl Solver for GurobiSolver {
         for var in polyhedron.variables.iter() {
             let (lower, upper) = var.bound;
 
-            // Use binary variables for [0,1] bounds, integer otherwise
-            // Binary variables are optimized more efficiently by Gurobi
+            // Use binary variables for [0,1] bounds
             let gurobi_var = if lower == 0 && upper == 1 {
                 add_binvar!(
                     model,
@@ -103,7 +126,7 @@ impl Solver for GurobiSolver {
             details: format!("Failed to update model after adding variables: {}", e),
         })?;
 
-        // Build sparse matrix structure: for each row, collect its column entries
+        // Build sparse matrix structure
         let n_rows = polyhedron.a.shape.nrows;
         let n_cols = polyhedron.a.shape.ncols;
         let mut row_data: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n_rows];
@@ -126,7 +149,7 @@ impl Solver for GurobiSolver {
 
             let rhs = polyhedron.b.get(row_idx).copied().unwrap_or(0) as f64;
 
-            // Build linear expression for this constraint
+            // Build linear expression
             let expr = entries.iter().fold(
                 Expr::Constant(0.0),
                 |acc, &(col_idx, coeff)| {
@@ -146,6 +169,68 @@ impl Solver for GurobiSolver {
             details: format!("Failed to update model after adding constraints: {}", e),
         })?;
 
+        Ok(Arc::new(Mutex::new(CachedGurobiModel {
+            model,
+            vars,
+            n_vars: polyhedron.variables.len(),
+        })))
+    }
+
+    /// Get or build a model for the given polyhedron
+    fn get_or_build_model(
+        &self,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        use_presolve: bool,
+    ) -> Result<Arc<Mutex<CachedGurobiModel>>, SolveInputError> {
+        if !self.cache_enabled {
+            // Cache disabled, always build new model
+            return Self::build_model(polyhedron, use_presolve);
+        }
+
+        // Check cache first
+        {
+            let mut cache = self.model_cache.lock();
+            if let Some(cached_model) = cache.get(polyhedron) {
+                return Ok(Arc::clone(cached_model));
+            }
+        }
+
+        // Not in cache, build new model
+        let model = Self::build_model(polyhedron, use_presolve)?;
+
+        // Store in cache
+        {
+            let mut cache = self.model_cache.lock();
+            cache.put(polyhedron.clone(), Arc::clone(&model));
+        }
+
+        Ok(model)
+    }
+}
+
+impl Solver for GurobiSolver {
+    fn solve(
+        &self,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        objectives: &[HashMap<String, f64>],
+        direction: SolverDirection,
+        use_presolve: bool,
+    ) -> std::result::Result<Vec<ApiSolution>, SolveInputError> {
+        // Use GLPK polyhedron for validation
+        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
+        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
+
+        // Get or build cached model
+        let cached_model = self.get_or_build_model(polyhedron, use_presolve)?;
+        let mut model_lock = cached_model.lock();
+
+        let sense = match direction {
+            SolverDirection::Maximize => ModelSense::Maximize,
+            SolverDirection::Minimize => ModelSense::Minimize,
+        };
+
+        let mut solutions = Vec::new();
+
         // Solve each objective by updating objective coefficients
         for objective in objectives {
             // Build objective expression
@@ -154,24 +239,24 @@ impl Solver for GurobiSolver {
                 |acc, (idx, var)| {
                     let coeff = objective.get(&var.id).copied().unwrap_or(0.0);
                     if coeff != 0.0 {
-                        acc + coeff * vars[idx]
+                        acc + coeff * model_lock.vars[idx]
                     } else {
                         acc
                     }
                 }
             );
 
-            model.set_objective(obj_expr, sense).map_err(|e| SolveInputError {
+            model_lock.model.set_objective(obj_expr, sense).map_err(|e| SolveInputError {
                 details: format!("Failed to set objective: {}", e),
             })?;
 
             // Optimize
-            model.optimize().map_err(|e| SolveInputError {
+            model_lock.model.optimize().map_err(|e| SolveInputError {
                 details: format!("Failed to optimize: {}", e),
             })?;
 
             // Extract solution
-            let model_status = model.status().map_err(|e| SolveInputError {
+            let model_status = model_lock.model.status().map_err(|e| SolveInputError {
                 details: format!("Failed to get model status: {}", e),
             })?;
             let status = Self::convert_status(model_status);
@@ -182,7 +267,7 @@ impl Solver for GurobiSolver {
                 let (lower, upper) = var.bound;
 
                 // Get solution value, or use fixed value if variable was eliminated by presolve
-                let value = model.get_obj_attr(attr::X, &vars[idx])
+                let value = model_lock.model.get_obj_attr(attr::X, &model_lock.vars[idx])
                     .unwrap_or_else(|_| {
                         // If variable is fixed (lower == upper), use the fixed value
                         if lower == upper {
