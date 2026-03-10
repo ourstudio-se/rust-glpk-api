@@ -7,7 +7,7 @@
 # Want to help us make this template better? Share your feedback here: https://forms.gle/ybq9Krt8jtBL3iCk7
 
 ARG RUST_VERSION=1.93.0
-ARG APP_NAME=rust-glpk
+ARG APP_NAME=rust-solver-api
 ARG GLPK_VER=5.0
 
 ################################################################################

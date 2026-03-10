@@ -46,7 +46,7 @@ pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> B
             } else {
                 Box::new(GlpkSolver::with_cache_size(cache_size))
             }
-        },
+        }
         #[cfg(feature = "highs-solver")]
         SolverType::Highs => {
             if cache_size == 0 {
@@ -54,7 +54,7 @@ pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> B
             } else {
                 Box::new(HighsSolver::with_cache_size(cache_size))
             }
-        },
+        }
         #[cfg(feature = "gurobi-solver")]
         SolverType::Gurobi => {
             if cache_size == 0 {
@@ -62,7 +62,7 @@ pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> B
             } else {
                 Box::new(GurobiSolver::with_cache_size(cache_size))
             }
-        },
+        }
     }
 }
 

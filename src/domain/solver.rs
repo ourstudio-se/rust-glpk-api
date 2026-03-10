@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use crate::models::{ApiSolution, SparseLEIntegerPolyhedron, SolverDirection};
 use crate::domain::validate::SolveInputError;
+use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron};
+use std::collections::HashMap;
 
 /// Common interface for LP/ILP solvers
 pub trait Solver: Send + Sync {

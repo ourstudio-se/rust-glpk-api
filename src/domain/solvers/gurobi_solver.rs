@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::convert::to_glpk_polyhedron;
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveInputError};
-use crate::models::{ApiSolution, SparseLEIntegerPolyhedron, SolverDirection, Status};
-use crate::convert::to_glpk_polyhedron;
+use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use grb::prelude::*;
 use lru::LruCache;
@@ -87,9 +87,10 @@ impl GurobiSolver {
         })?;
 
         // Configure presolve: -1 = auto, 0 = off, 1 = conservative, 2 = aggressive
-        env.set(param::Presolve, if use_presolve { -1 } else { 0 }).map_err(|e| SolveInputError {
-            details: format!("Failed to set Gurobi presolve: {}", e),
-        })?;
+        env.set(param::Presolve, if use_presolve { -1 } else { 0 })
+            .map_err(|e| SolveInputError {
+                details: format!("Failed to set Gurobi presolve: {}", e),
+            })?;
 
         // Create a Gurobi model
         let mut model = Model::with_env("optimization", &env).map_err(|e| SolveInputError {
@@ -106,7 +107,8 @@ impl GurobiSolver {
                 add_binvar!(
                     model,
                     name: &var.id
-                ).map_err(|e| SolveInputError {
+                )
+                .map_err(|e| SolveInputError {
                     details: format!("Failed to add binary variable: {}", e),
                 })?
             } else {
@@ -114,7 +116,8 @@ impl GurobiSolver {
                     model,
                     name: &var.id,
                     bounds: lower as f64..upper as f64
-                ).map_err(|e| SolveInputError {
+                )
+                .map_err(|e| SolveInputError {
                     details: format!("Failed to add integer variable: {}", e),
                 })?
             };
@@ -150,19 +153,18 @@ impl GurobiSolver {
             let rhs = polyhedron.b.get(row_idx).copied().unwrap_or(0) as f64;
 
             // Build linear expression
-            let expr = entries.iter().fold(
-                Expr::Constant(0.0),
-                |acc, &(col_idx, coeff)| {
+            let expr = entries
+                .iter()
+                .fold(Expr::Constant(0.0), |acc, &(col_idx, coeff)| {
                     acc + coeff * vars[col_idx]
-                }
-            );
+                });
 
             let constraint_name = format!("c{}", row_idx);
-            model.add_constr(&constraint_name, c!(expr <= rhs)).map_err(|e| {
-                SolveInputError {
+            model
+                .add_constr(&constraint_name, c!(expr <= rhs))
+                .map_err(|e| SolveInputError {
                     details: format!("Failed to add constraint: {}", e),
-                }
-            })?;
+                })?;
         }
 
         model.update().map_err(|e| SolveInputError {
@@ -243,12 +245,15 @@ impl Solver for GurobiSolver {
                     } else {
                         acc
                     }
-                }
+                },
             );
 
-            model_lock.model.set_objective(obj_expr, sense).map_err(|e| SolveInputError {
-                details: format!("Failed to set objective: {}", e),
-            })?;
+            model_lock
+                .model
+                .set_objective(obj_expr, sense)
+                .map_err(|e| SolveInputError {
+                    details: format!("Failed to set objective: {}", e),
+                })?;
 
             // Optimize
             model_lock.model.optimize().map_err(|e| SolveInputError {
@@ -267,7 +272,9 @@ impl Solver for GurobiSolver {
                 let (lower, upper) = var.bound;
 
                 // Get solution value, or use fixed value if variable was eliminated by presolve
-                let value = model_lock.model.get_obj_attr(attr::X, &model_lock.vars[idx])
+                let value = model_lock
+                    .model
+                    .get_obj_attr(attr::X, &model_lock.vars[idx])
                     .unwrap_or_else(|_| {
                         // If variable is fixed (lower == upper), use the fixed value
                         if lower == upper {

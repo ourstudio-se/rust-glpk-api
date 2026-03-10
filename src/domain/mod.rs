@@ -1,4 +1,4 @@
-mod validate;
 pub mod solver;
-pub mod solvers;
 pub mod solver_factory;
+pub mod solvers;
+mod validate;

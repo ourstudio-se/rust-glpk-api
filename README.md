@@ -224,16 +224,16 @@ To compare solver performance on your workload:
 
 ```bash
 # Test with GLPK
-time SOLVER=glpk ./target/release/rust-glpk
+time SOLVER=glpk ./target/release/rust-solver-api
 
 # Test with HiGHS
-time SOLVER=highs ./target/release/rust-glpk
+time SOLVER=highs ./target/release/rust-solver-api
 
 # Test with Gurobi
-time GUROBI_HOME=/path/to/gurobi SOLVER=gurobi ./target/release/rust-glpk
+time GUROBI_HOME=/path/to/gurobi SOLVER=gurobi ./target/release/rust-solver-api
 
 # Test with Hexaly
-time HEXALY_HOME=/path/to/hexaly SOLVER=hexaly ./target/release/rust-glpk
+time HEXALY_HOME=/path/to/hexaly SOLVER=hexaly ./target/release/rust-solver-api
 ```
 
 ### API Compatibility
@@ -408,6 +408,76 @@ USE_PRESOLVE=false cargo run
 ```
 
 **Note**: GLPK uses its own presolve configuration internally and ignores this setting.
+
+### 📊 Sentry Monitoring
+
+The API integrates with [Sentry](https://sentry.io/) for error tracking and performance monitoring.
+
+#### Configuration
+
+Enable Sentry by setting these environment variables:
+
+```bash
+SENTRY_DSN=https://your-dsn@sentry.io/project-id
+SENTRY_ENVIRONMENT=production  # or development, staging, etc.
+SENTRY_SERVICE_NAME=rust-solver-api
+SENTRY_CAAS_TAG=your-service-tag  # Optional: custom tag for Cloud-as-a-Service deployments
+```
+
+#### What Gets Tracked
+
+**Performance Metrics** (sent as breadcrumbs):
+- Solve duration for each request
+- Number of variables, constraints, and objectives
+- Solver used (GLPK, HiGHS, Gurobi)
+- Presolve status
+
+**Errors**:
+- Application panics (with full stack traces)
+- Solver failures with context
+- Input validation errors
+
+**Context** (automatically attached):
+- Server environment (OS, architecture)
+- Rust version and dependencies
+- Service name and environment tag
+
+#### Example `.env` Configuration
+
+```env
+# Sentry Configuration
+SENTRY_DSN=https://abc123@o123456.ingest.sentry.io/7891234
+SENTRY_ENVIRONMENT=production
+SENTRY_SERVICE_NAME=rust-solver-api
+SENTRY_CAAS_TAG=optimization-cluster-1
+
+# Server Configuration
+PORT=9000
+SOLVER=highs
+USE_PRESOLVE=true
+```
+
+#### Viewing Performance Data
+
+Sentry breadcrumbs are attached to error events, providing context about recent solve operations:
+
+1. When an error occurs, view it in your Sentry dashboard
+2. Check the "Breadcrumbs" tab to see recent solve performance metrics
+3. Each breadcrumb includes:
+   - `duration_seconds` - Time taken to solve
+   - `variables` - Number of decision variables
+   - `constraints` - Number of constraints
+   - `objectives` - Number of objectives solved
+   - `presolve` - Whether presolve was enabled
+   - `solver` - Which solver backend was used
+
+This helps identify performance patterns or problematic inputs that lead to errors.
+
+#### Enabling/Disabling Sentry
+
+Sentry is **automatically enabled** when `SENTRY_DSN` is present in your environment. If you don't set `SENTRY_DSN`, the application runs without monitoring (all Sentry operations become no-ops).
+
+To disable Sentry, simply remove or comment out the `SENTRY_DSN` variable from your `.env` file.
 
 ### 🛡️ Protected mode
 

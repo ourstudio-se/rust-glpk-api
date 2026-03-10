@@ -2,7 +2,7 @@ mod convert;
 mod domain;
 mod models;
 
-use models::{ApiSolution, SolveRequest};
+use models::SolveRequest;
 
 use domain::solver::Solver;
 use domain::solver_factory::{create_solver_with_cache, SolverType};
@@ -36,30 +36,21 @@ pub async fn solve(
         Err(response) => return response,
     }
 
-    // Use the solver abstraction with timing
-    let start = Instant::now();
-    let presolve = *use_presolve.as_ref();
-    let solve_result = solver.solve(&req.polyhedron, &req.objectives, req.direction, presolve);
-    let duration = start.elapsed();
-
-    println!("Solve time: {:.3}s ({} variables, {} constraints, {} objectives, presolve: {})",
-             duration.as_secs_f64(),
-             req.polyhedron.variables.len(),
-             req.polyhedron.a.shape.nrows,
-             req.objectives.len(),
-             if presolve { "on" } else { "off" });
-
-    let api_solutions: Vec<ApiSolution>;
-    match solve_result {
-        Ok(solutions) => api_solutions = solutions,
+    match solver.solve(&req.polyhedron, &req.objectives, req.direction, *use_presolve.as_ref()) {
+        Ok(api_solutions) => {
+            HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
+        }
         Err(error) => {
-            return HttpResponse::UnprocessableEntity().json(serde_json::json!({
+            // Capture error with breadcrumb context
+            sentry::capture_message(
+                &format!("Solve failed: {}", error.details),
+                sentry::Level::Error,
+            );
+            HttpResponse::UnprocessableEntity().json(serde_json::json!({
                 "error": error.details,
             }))
         }
     }
-
-    HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
 }
 
 fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
@@ -275,15 +266,14 @@ async fn main() -> std::io::Result<()> {
         String::new()
     };
 
-    let use_sentry = env::var("USE_SENTRY")
-        .ok()
-        .and_then(|s| s.parse::<bool>().ok())
-        .unwrap_or(false);
-
+    // Initialize Sentry if DSN is configured
     // Guard must be kept in scope until the server exits
-    let _sentry_guard = if use_sentry {
+    let sentry_enabled = env::var("SENTRY_DSN").is_ok();
+    let _sentry_guard = if sentry_enabled {
+        println!("Sentry monitoring enabled");
         Some(init_sentry())
     } else {
+        println!("Sentry monitoring disabled (no SENTRY_DSN configured)");
         None
     };
     // Select solver based on environment variable (default: GLPK)
@@ -311,7 +301,10 @@ async fn main() -> std::io::Result<()> {
         if protect { "protected" } else { "unprotected" }
     );
     println!("Using solver: {}", solver.name());
-    println!("Presolve: {}", if use_presolve { "enabled" } else { "disabled" });
+    println!(
+        "Presolve: {}",
+        if use_presolve { "enabled" } else { "disabled" }
+    );
     if cache_size == 0 {
         println!("LRU Model builder cache: disabled");
     } else {
@@ -326,7 +319,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .wrap(Condition::new(use_sentry, Sentry::new()))
+            .wrap(Condition::new(sentry_enabled, Sentry::new()))
             .app_data(solver_data.clone())
             .app_data(presolve_data.clone())
             .app_data(
@@ -359,14 +352,15 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use actix_web::http::StatusCode;
     use std::collections::HashMap;
 
-    use models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SparseLEIntegerPolyhedron, SolverDirection};
+    use models::{
+        ApiIntegerSparseMatrix, ApiShape, ApiVariable, SolverDirection, SparseLEIntegerPolyhedron,
+    };
 
     fn make_valid_request() -> SolveRequest {
         SolveRequest {

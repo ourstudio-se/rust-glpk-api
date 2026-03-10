@@ -25,7 +25,7 @@ cd ..
 sleep 2
 
 # Check if containers are running
-if docker ps | grep -q rust-glpk-default && docker ps | grep -q rust-glpk-highs; then
+if docker ps | grep -q rust-solver-api && docker ps | grep -q highs; then
     echo "✅ Docker containers started successfully"
 else
     echo "⚠️  Warning: Some Docker containers may not have started"

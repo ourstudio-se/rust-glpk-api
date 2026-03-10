@@ -1,11 +1,11 @@
+use crate::convert::to_glpk_polyhedron;
+use crate::domain::solver::Solver;
+use crate::domain::validate::{validate_objectives_owned, SolveInputError};
+use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_void;
 use std::sync::Arc;
-use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveInputError};
-use crate::models::{ApiSolution, SparseLEIntegerPolyhedron, SolverDirection, Status};
-use crate::convert::to_glpk_polyhedron;
 
 use highs_sys::*;
 use lru::LruCache;
@@ -77,7 +77,9 @@ impl HighsSolver {
         match status {
             HIGHS_MODEL_STATUS_OPTIMAL => Status::Optimal,
             HIGHS_MODEL_STATUS_INFEASIBLE => Status::Infeasible,
-            HIGHS_MODEL_STATUS_UNBOUNDED | HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE => Status::Unbounded,
+            HIGHS_MODEL_STATUS_UNBOUNDED | HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE => {
+                Status::Unbounded
+            }
             _ => Status::Undefined,
         }
     }
@@ -153,8 +155,16 @@ impl HighsSolver {
 
         // Prepare column bounds and costs (zero costs, will be updated per objective)
         let col_costs = vec![0.0; n_cols as usize];
-        let col_lower: Vec<f64> = polyhedron.variables.iter().map(|v| v.bound.0 as f64).collect();
-        let col_upper: Vec<f64> = polyhedron.variables.iter().map(|v| v.bound.1 as f64).collect();
+        let col_lower: Vec<f64> = polyhedron
+            .variables
+            .iter()
+            .map(|v| v.bound.0 as f64)
+            .collect();
+        let col_upper: Vec<f64> = polyhedron
+            .variables
+            .iter()
+            .map(|v| v.bound.1 as f64)
+            .collect();
 
         // Add columns with constraints
         unsafe {
@@ -270,7 +280,13 @@ impl Solver for HighsSolver {
             // Extract solution
             let mut solution_values = vec![0.0; n_cols as usize];
             unsafe {
-                Highs_getSolution(highs_ptr, solution_values.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                Highs_getSolution(
+                    highs_ptr,
+                    solution_values.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                );
             }
 
             // Map solution back to variable names
@@ -282,7 +298,8 @@ impl Solver for HighsSolver {
             }
 
             // Calculate objective value
-            let objective_value: f64 = solution_map.iter()
+            let objective_value: f64 = solution_map
+                .iter()
                 .filter_map(|(var_id, &val)| {
                     objective.get(var_id).map(|coeff| coeff * (val as f64))
                 })
@@ -346,7 +363,12 @@ mod tests {
         obj2.insert("y".to_string(), 1.0);
 
         // First solve - should build model
-        let result1 = solver.solve(&polyhedron, &[obj1.clone()], SolverDirection::Maximize, true);
+        let result1 = solver.solve(
+            &polyhedron,
+            &[obj1.clone()],
+            SolverDirection::Maximize,
+            true,
+        );
         assert!(result1.is_ok());
 
         // Second solve with same polyhedron, different objective - should reuse cached model
