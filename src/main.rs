@@ -18,7 +18,6 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 
 use dotenv::dotenv;
 use std::env;
-use std::time::Instant;
 
 use sentry_actix::Sentry;
 use std::sync::Arc;
@@ -36,7 +35,12 @@ pub async fn solve(
         Err(response) => return response,
     }
 
-    match solver.solve(&req.polyhedron, &req.objectives, req.direction, *use_presolve.as_ref()) {
+    match solver.solve(
+        &req.polyhedron,
+        &req.objectives,
+        req.direction,
+        *use_presolve.as_ref(),
+    ) {
         Ok(api_solutions) => {
             HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
         }
