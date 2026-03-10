@@ -2,14 +2,12 @@
 
 ARG RUST_VERSION=1.86.0
 ARG APP_NAME=rust-glpk
-ARG GLPK_VER=5.0
 
 ################################################################################
 # Create a stage for building the application.
 
 FROM rust:${RUST_VERSION}-slim-bookworm AS build
 ARG APP_NAME
-ARG GLPK_VER
 WORKDIR /app
 
 # Install build dependencies including C++ compiler and clang for bindgen
@@ -26,7 +24,7 @@ RUN apt-get update && apt-get install -y \
 # Set environment variable for HiGHS solver
 ENV SOLVER=highs
 
-# Viktigt för att kunna använda ${TARGETPLATFORM} i RUN
+# Required so ${TARGETPLATFORM} can be used in RUN cache keys
 ARG TARGETPLATFORM
 
 RUN --mount=type=bind,source=src,target=src \
@@ -49,6 +47,8 @@ FROM debian:bookworm-slim AS final
 RUN apt-get update && apt-get install -y \
     libgcc-s1 \
     libstdc++6 \
+    libglpk40 \
+    libgmp10 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-privileged user that the app will run under.
@@ -70,7 +70,7 @@ COPY --from=build /bin/server /bin/
 ENV SOLVER=highs
 
 # Expose the port that the application listens on.
-EXPOSE 9001
+EXPOSE 9000
 
 # What the container should run when it is started.
 CMD ["/bin/server"]

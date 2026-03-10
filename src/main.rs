@@ -5,7 +5,7 @@ mod models;
 use models::{ApiSolution, SolveRequest};
 
 use domain::solver::Solver;
-use domain::solver_factory::{create_solver, SolverType};
+use domain::solver_factory::{create_solver_with_cache, SolverType};
 
 use actix_web::body::BoxBody;
 use actix_web::http::header::HeaderName;
@@ -302,7 +302,13 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| s.parse::<bool>().ok())
         .unwrap_or(true);
 
-    let solver = create_solver(solver_type);
+    // Configure model cache size (default: 100, 0 to disable)
+    let cache_size = env::var("MODEL_CACHE_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100);
+
+    let solver = create_solver_with_cache(solver_type, cache_size);
 
     println!(
         "Server is {}",
@@ -310,6 +316,7 @@ async fn main() -> std::io::Result<()> {
     );
     println!("Using solver: {}", solver.name());
     println!("Presolve: {}", if use_presolve { "enabled" } else { "disabled" });
+    println!("LRU Model builder cache: {} entries", if cache_size == 0 { "disabled".to_string() } else { cache_size.to_string() });
     println!("Starting server on http://127.0.0.1:{}", port);
 
     // Clone solver and presolve flag for use in the closure

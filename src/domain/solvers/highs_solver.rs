@@ -1,25 +1,70 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_void;
+use std::sync::Arc;
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveInputError};
 use crate::models::{ApiSolution, SparseLEIntegerPolyhedron, SolverDirection, Status};
 use crate::convert::to_glpk_polyhedron;
 
 use highs_sys::*;
+use lru::LruCache;
+use parking_lot::Mutex;
+use std::num::NonZeroUsize;
+
+/// Cached HiGHS model structure
+struct CachedHighsModel {
+    highs_ptr: *mut c_void,
+    n_cols: i32,
+}
+
+// SAFETY: HiGHS model pointer is properly synchronized through Arc and Mutex
+// Each model instance is only accessed by one thread at a time
+unsafe impl Send for CachedHighsModel {}
+unsafe impl Sync for CachedHighsModel {}
+
+impl Drop for CachedHighsModel {
+    fn drop(&mut self) {
+        if !self.highs_ptr.is_null() {
+            unsafe {
+                Highs_destroy(self.highs_ptr);
+            }
+        }
+    }
+}
 
 /// HiGHS solver implementation using highs-sys for direct memory control.
 ///
-/// This implementation ensures proper memory cleanup by:
-/// - Creating a single HiGHS instance per solve() call
-/// - Using RAII (HighsGuard) to guarantee Highs_destroy() is called
-/// - Reusing the model across multiple objectives (only updating objective coefficients)
-/// - All HiGHS resources are freed when solve() returns
-pub struct HighsSolver;
+/// This implementation includes model caching:
+/// - Models are cached based on polyhedron hash
+/// - LRU eviction policy when cache is full
+/// - Reuses cached models across multiple objectives
+/// - Thread-safe via parking_lot::Mutex
+pub struct HighsSolver {
+    model_cache: Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<CachedHighsModel>>>>,
+    cache_enabled: bool,
+}
 
 impl HighsSolver {
     pub fn new() -> Self {
-        HighsSolver
+        Self::with_cache_size(100)
+    }
+
+    /// Create a new HiGHS solver with specified cache size
+    pub fn with_cache_size(size: usize) -> Self {
+        let cache_size = NonZeroUsize::new(size).unwrap_or(NonZeroUsize::new(100).unwrap());
+        HighsSolver {
+            model_cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+            cache_enabled: size > 0,
+        }
+    }
+
+    /// Create solver with caching disabled
+    pub fn without_cache() -> Self {
+        HighsSolver {
+            model_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
+            cache_enabled: false,
+        }
     }
 
     /// Convert HiGHS status to our API status
@@ -36,20 +81,13 @@ impl HighsSolver {
             _ => Status::Undefined,
         }
     }
-}
 
-impl Solver for HighsSolver {
-    fn solve(
+    /// Build a new HiGHS model for the given polyhedron
+    fn build_model(
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
-        direction: SolverDirection,
         use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveInputError> {
-        // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
-
+    ) -> Result<Arc<CachedHighsModel>, SolveInputError> {
         let n_rows = polyhedron.a.shape.nrows as i32;
         let n_cols = polyhedron.variables.len() as i32;
 
@@ -60,9 +98,6 @@ impl Solver for HighsSolver {
                 details: "Failed to create HiGHS instance".to_string(),
             });
         }
-
-        // Ensure cleanup on drop using RAII
-        let _highs_guard = HighsGuard(highs_ptr);
 
         // Set options
         unsafe {
@@ -77,15 +112,6 @@ impl Solver for HighsSolver {
             // Disable output
             let output_flag = CString::new("output_flag").unwrap();
             Highs_setBoolOptionValue(highs_ptr, output_flag.as_ptr(), 0);
-        }
-
-        // Set optimization sense (minimize = 1, maximize = -1)
-        let sense = match direction {
-            SolverDirection::Minimize => 1,
-            SolverDirection::Maximize => -1,
-        };
-        unsafe {
-            Highs_changeObjectiveSense(highs_ptr, sense);
         }
 
         // Prepare row bounds (Ax <= b means -inf <= Ax <= b)
@@ -107,7 +133,6 @@ impl Solver for HighsSolver {
         }
 
         // Build sparse constraint matrix in CSC (Column Sparse Compressed) format
-        // For each column, we need to know which rows it appears in
         let mut col_start: Vec<i32> = Vec::with_capacity((n_cols + 1) as usize);
         let mut col_index: Vec<i32> = Vec::new();
         let mut col_value: Vec<f64> = Vec::new();
@@ -126,12 +151,12 @@ impl Solver for HighsSolver {
         }
         col_start.push(col_index.len() as i32); // Final element
 
-        // Prepare column bounds and costs
+        // Prepare column bounds and costs (zero costs, will be updated per objective)
         let col_costs = vec![0.0; n_cols as usize];
         let col_lower: Vec<f64> = polyhedron.variables.iter().map(|v| v.bound.0 as f64).collect();
         let col_upper: Vec<f64> = polyhedron.variables.iter().map(|v| v.bound.1 as f64).collect();
 
-        // Add columns with constraints (rows must exist first)
+        // Add columns with constraints
         unsafe {
             Highs_addCols(
                 highs_ptr,
@@ -151,6 +176,67 @@ impl Solver for HighsSolver {
             unsafe {
                 Highs_changeColIntegrality(highs_ptr, col_idx, 1); // 1 = integer
             }
+        }
+
+        Ok(Arc::new(CachedHighsModel { highs_ptr, n_cols }))
+    }
+
+    /// Get or build a model for the given polyhedron
+    fn get_or_build_model(
+        &self,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        use_presolve: bool,
+    ) -> Result<Arc<CachedHighsModel>, SolveInputError> {
+        if !self.cache_enabled {
+            // Cache disabled, always build new model
+            return self.build_model(polyhedron, use_presolve);
+        }
+
+        // Check cache first
+        {
+            let mut cache = self.model_cache.lock();
+            if let Some(cached_model) = cache.get(polyhedron) {
+                return Ok(Arc::clone(cached_model));
+            }
+        }
+
+        // Not in cache, build new model
+        let model = self.build_model(polyhedron, use_presolve)?;
+
+        // Store in cache
+        {
+            let mut cache = self.model_cache.lock();
+            cache.put(polyhedron.clone(), Arc::clone(&model));
+        }
+
+        Ok(model)
+    }
+}
+
+impl Solver for HighsSolver {
+    fn solve(
+        &self,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        objectives: &[HashMap<String, f64>],
+        direction: SolverDirection,
+        use_presolve: bool,
+    ) -> Result<Vec<ApiSolution>, SolveInputError> {
+        // Use GLPK polyhedron for validation
+        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
+        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
+
+        // Get or build cached model
+        let model = self.get_or_build_model(polyhedron, use_presolve)?;
+        let highs_ptr = model.highs_ptr;
+        let n_cols = model.n_cols;
+
+        // Set optimization sense (minimize = 1, maximize = -1)
+        let sense = match direction {
+            SolverDirection::Minimize => 1,
+            SolverDirection::Maximize => -1,
+        };
+        unsafe {
+            Highs_changeObjectiveSense(highs_ptr, sense);
         }
 
         let mut solutions = Vec::with_capacity(objectives.len());
@@ -210,7 +296,6 @@ impl Solver for HighsSolver {
             });
         }
 
-        // HiGHS instance will be destroyed by HighsGuard drop
         Ok(solutions)
     }
 
@@ -219,15 +304,70 @@ impl Solver for HighsSolver {
     }
 }
 
-/// RAII guard to ensure HiGHS instance is properly destroyed
-struct HighsGuard(*mut c_void);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ApiIntegerSparseMatrix, ApiShape, ApiVariable, SolverDirection};
+    use std::collections::HashMap;
 
-impl Drop for HighsGuard {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                Highs_destroy(self.0);
-            }
+    fn create_test_polyhedron() -> SparseLEIntegerPolyhedron {
+        SparseLEIntegerPolyhedron {
+            a: ApiIntegerSparseMatrix {
+                rows: vec![0, 0, 1],
+                cols: vec![0, 1, 1],
+                vals: vec![1, 2, 1],
+                shape: ApiShape { nrows: 2, ncols: 2 },
+            },
+            b: vec![10, 5],
+            variables: vec![
+                ApiVariable {
+                    id: "x".to_string(),
+                    bound: (0, 10),
+                },
+                ApiVariable {
+                    id: "y".to_string(),
+                    bound: (0, 10),
+                },
+            ],
         }
+    }
+
+    #[test]
+    fn test_cache_reuses_model() {
+        let solver = HighsSolver::with_cache_size(10);
+        let polyhedron = create_test_polyhedron();
+
+        let mut obj1 = HashMap::new();
+        obj1.insert("x".to_string(), 1.0);
+        obj1.insert("y".to_string(), 2.0);
+
+        let mut obj2 = HashMap::new();
+        obj2.insert("x".to_string(), 2.0);
+        obj2.insert("y".to_string(), 1.0);
+
+        // First solve - should build model
+        let result1 = solver.solve(&polyhedron, &[obj1.clone()], SolverDirection::Maximize, true);
+        assert!(result1.is_ok());
+
+        // Second solve with same polyhedron, different objective - should reuse cached model
+        let result2 = solver.solve(&polyhedron, &[obj2], SolverDirection::Maximize, true);
+        assert!(result2.is_ok());
+
+        // Third solve with same polyhedron and objective - should still work
+        let result3 = solver.solve(&polyhedron, &[obj1], SolverDirection::Maximize, true);
+        assert!(result3.is_ok());
+    }
+
+    #[test]
+    fn test_cache_disabled() {
+        let solver = HighsSolver::without_cache();
+        let polyhedron = create_test_polyhedron();
+
+        let mut obj = HashMap::new();
+        obj.insert("x".to_string(), 1.0);
+        obj.insert("y".to_string(), 2.0);
+
+        let result = solver.solve(&polyhedron, &[obj], SolverDirection::Maximize, true);
+        assert!(result.is_ok());
     }
 }

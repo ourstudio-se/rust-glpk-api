@@ -7,9 +7,6 @@ use crate::domain::solvers::HighsSolver;
 #[cfg(feature = "gurobi-solver")]
 use crate::domain::solvers::GurobiSolver;
 
-#[cfg(feature = "hexaly-solver")]
-use crate::domain::solvers::HexalySolver;
-
 /// Available solver backends
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolverType {
@@ -18,8 +15,6 @@ pub enum SolverType {
     Highs,
     #[cfg(feature = "gurobi-solver")]
     Gurobi,
-    #[cfg(feature = "hexaly-solver")]
-    Hexaly,
 }
 
 impl SolverType {
@@ -31,8 +26,6 @@ impl SolverType {
             "highs" => Some(SolverType::Highs),
             #[cfg(feature = "gurobi-solver")]
             "gurobi" => Some(SolverType::Gurobi),
-            #[cfg(feature = "hexaly-solver")]
-            "hexaly" => Some(SolverType::Hexaly),
             _ => None,
         }
     }
@@ -40,14 +33,29 @@ impl SolverType {
 
 /// Create a solver instance based on the specified type
 pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
+    create_solver_with_cache(solver_type, 100)
+}
+
+/// Create a solver instance with specified cache size
+pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> Box<dyn Solver> {
     match solver_type {
-        SolverType::Glpk => Box::new(GlpkSolver::new()),
+        SolverType::Glpk => {
+            let _ = cache_size; // Cache not supported for GLPK
+            Box::new(GlpkSolver::new())
+        },
         #[cfg(feature = "highs-solver")]
-        SolverType::Highs => Box::new(HighsSolver::new()),
+        SolverType::Highs => {
+            if cache_size == 0 {
+                Box::new(HighsSolver::without_cache())
+            } else {
+                Box::new(HighsSolver::with_cache_size(cache_size))
+            }
+        },
         #[cfg(feature = "gurobi-solver")]
-        SolverType::Gurobi => Box::new(GurobiSolver::new()),
-        #[cfg(feature = "hexaly-solver")]
-        SolverType::Hexaly => Box::new(HexalySolver::new()),
+        SolverType::Gurobi => {
+            let _ = cache_size; // Cache not supported for Gurobi
+            Box::new(GurobiSolver::new())
+        },
     }
 }
 
@@ -67,10 +75,6 @@ mod tests {
         assert_eq!(SolverType::from_str("gurobi"), Some(SolverType::Gurobi));
         #[cfg(feature = "gurobi-solver")]
         assert_eq!(SolverType::from_str("Gurobi"), Some(SolverType::Gurobi));
-        #[cfg(feature = "hexaly-solver")]
-        assert_eq!(SolverType::from_str("hexaly"), Some(SolverType::Hexaly));
-        #[cfg(feature = "hexaly-solver")]
-        assert_eq!(SolverType::from_str("Hexaly"), Some(SolverType::Hexaly));
         assert_eq!(SolverType::from_str("unknown"), None);
     }
 
@@ -92,12 +96,5 @@ mod tests {
     fn test_create_gurobi_solver() {
         let solver = create_solver(SolverType::Gurobi);
         assert_eq!(solver.name(), "Gurobi");
-    }
-
-    #[cfg(feature = "hexaly-solver")]
-    #[test]
-    fn test_create_hexaly_solver() {
-        let solver = create_solver(SolverType::Hexaly);
-        assert_eq!(solver.name(), "Hexaly");
     }
 }
