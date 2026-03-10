@@ -32,6 +32,7 @@ impl SolverType {
 }
 
 /// Create a solver instance based on the specified type
+#[cfg(test)]
 pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
     create_solver_with_cache(solver_type, 0) // Default to no cache
 }

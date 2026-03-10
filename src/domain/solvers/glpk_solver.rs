@@ -15,10 +15,6 @@ const NO_TERMINAL_OUTPUT: bool = false;
 pub struct GlpkSolver;
 
 impl GlpkSolver {
-    pub fn new() -> Self {
-        GlpkSolver
-    }
-
     /// Create a new GLPK solver with specified cache size
     /// Note: Cache is not supported for GLPK, parameter ignored
     pub fn with_cache_size(_size: usize) -> Self {
