@@ -24,51 +24,47 @@ impl SolverType {
             "glpk" => Some(SolverType::Glpk),
             #[cfg(feature = "highs-solver")]
             "highs" => Some(SolverType::Highs),
+            #[cfg(not(feature = "highs-solver"))]
+            "highs" => panic!("Highs solver specified in environment but feature flag not present. Enable using `--features highs-solver`"),
             #[cfg(feature = "gurobi-solver")]
             "gurobi" => Some(SolverType::Gurobi),
+            #[cfg(not(feature = "gurobi-solver"))]
+            "gurobi" => panic!("Gurobi solver specified in environment but feature flag not present. Enable using `--features gurobi-solver`"),
             _ => None,
         }
     }
 }
 
-/// Create a solver instance based on the specified type
-#[cfg(test)]
-pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
-    create_solver_with_cache(solver_type, 0) // Default to no cache
-}
-
 /// Create a solver instance with specified cache size
-pub fn create_solver_with_cache(solver_type: SolverType, cache_size: usize) -> Box<dyn Solver> {
+pub fn create_solver_with_cache(
+    solver_type: SolverType,
+    cache_size: Option<usize>,
+) -> Box<dyn Solver> {
     match solver_type {
-        SolverType::Glpk => {
-            if cache_size == 0 {
-                Box::new(GlpkSolver::without_cache())
-            } else {
-                Box::new(GlpkSolver::with_cache_size(cache_size))
-            }
-        }
+        SolverType::Glpk => match cache_size {
+            Some(size) => Box::new(GlpkSolver::with_cache_size(Some(size))),
+            None => Box::new(GlpkSolver::without_cache()),
+        },
         #[cfg(feature = "highs-solver")]
-        SolverType::Highs => {
-            if cache_size == 0 {
-                Box::new(HighsSolver::without_cache())
-            } else {
-                Box::new(HighsSolver::with_cache_size(cache_size))
-            }
-        }
+        SolverType::Highs => match cache_size {
+            Some(size) => Box::new(HighsSolver::with_cache_size(Some(size))),
+            None => Box::new(HighsSolver::without_cache()),
+        },
         #[cfg(feature = "gurobi-solver")]
-        SolverType::Gurobi => {
-            if cache_size == 0 {
-                Box::new(GurobiSolver::without_cache())
-            } else {
-                Box::new(GurobiSolver::with_cache_size(cache_size))
-            }
-        }
+        SolverType::Gurobi => match cache_size {
+            Some(size) => Box::new(GurobiSolver::with_cache_size(Some(size))),
+            None => Box::new(GurobiSolver::without_cache()),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
+        create_solver_with_cache(solver_type, None) // Default to no cache
+    }
 
     #[test]
     fn test_solver_type_from_str() {

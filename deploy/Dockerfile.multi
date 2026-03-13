@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG RUST_VERSION=1.86.0
+ARG RUST_VERSION=1.93.0
 ARG APP_NAME=rust-solver-api
 
 ################################################################################
@@ -63,9 +63,6 @@ USER appuser
 
 # Copy the executable from the "build" stage.
 COPY --from=build /bin/server /bin/
-
-# Default to glpk solver (can be overridden at runtime with SOLVER=highs)
-ENV SOLVER=glpk
 
 # Expose the port that the application listens on.
 EXPOSE 9000

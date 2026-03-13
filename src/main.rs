@@ -295,8 +295,7 @@ async fn main() -> std::io::Result<()> {
     // Configure model cache size (default: 0 disabled, set to enable)
     let cache_size = env::var("MODEL_CACHE_SIZE")
         .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
+        .and_then(|s| s.parse::<usize>().ok());
 
     let solver = create_solver_with_cache(solver_type, cache_size);
 
@@ -309,10 +308,9 @@ async fn main() -> std::io::Result<()> {
         "Presolve: {}",
         if use_presolve { "enabled" } else { "disabled" }
     );
-    if cache_size == 0 {
-        println!("LRU Model builder cache: disabled");
-    } else {
-        println!("LRU Model builder cache: {} entries", cache_size);
+    match cache_size {
+        Some(cs) => println!("LRU Model builder cache: {} entries", cs),
+        None => println!("LRU Model builder cache: disabled"),
     }
     println!("Starting server on http://127.0.0.1:{}", port);
 

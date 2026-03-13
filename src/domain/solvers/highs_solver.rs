@@ -13,17 +13,17 @@ use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 
 /// Cached HiGHS model structure
-struct CachedHighsModel {
+struct HighsModel {
     highs_ptr: *mut c_void,
     n_cols: i32,
 }
 
 // SAFETY: HiGHS model pointer is properly synchronized through Arc and Mutex
 // Each model instance is only accessed by one thread at a time
-unsafe impl Send for CachedHighsModel {}
-unsafe impl Sync for CachedHighsModel {}
+unsafe impl Send for HighsModel {}
+unsafe impl Sync for HighsModel {}
 
-impl Drop for CachedHighsModel {
+impl Drop for HighsModel {
     fn drop(&mut self) {
         if !self.highs_ptr.is_null() {
             unsafe {
@@ -41,30 +41,26 @@ impl Drop for CachedHighsModel {
 /// - Reuses cached models across multiple objectives
 /// - Thread-safe via parking_lot::Mutex
 pub struct HighsSolver {
-    model_cache: Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<CachedHighsModel>>>>,
-    cache_enabled: bool,
+    model_cache: Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<HighsModel>>>>>,
 }
 
 impl HighsSolver {
-    pub fn new() -> Self {
-        Self::with_cache_size(100)
-    }
 
     /// Create a new HiGHS solver with specified cache size
-    pub fn with_cache_size(size: usize) -> Self {
-        let cache_size = NonZeroUsize::new(size).unwrap_or(NonZeroUsize::new(100).unwrap());
-        HighsSolver {
-            model_cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
-            cache_enabled: size > 0,
+    pub fn with_cache_size(size: Option<usize>) -> Self {
+        match size {
+            Some(0) | None => Self::without_cache(),
+            Some(s) => HighsSolver {
+                model_cache: Some(Arc::new(Mutex::new(LruCache::new(
+                    NonZeroUsize::new(s).unwrap(),
+                )))),
+            },
         }
     }
 
     /// Create solver with caching disabled
     pub fn without_cache() -> Self {
-        HighsSolver {
-            model_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
-            cache_enabled: false,
-        }
+        HighsSolver { model_cache: None }
     }
 
     /// Convert HiGHS status to our API status
@@ -89,7 +85,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<CachedHighsModel>, SolveInputError> {
+    ) -> Result<Arc<HighsModel>, SolveInputError> {
         let n_rows = polyhedron.a.shape.nrows as i32;
         let n_cols = polyhedron.variables.len() as i32;
 
@@ -188,7 +184,7 @@ impl HighsSolver {
             }
         }
 
-        Ok(Arc::new(CachedHighsModel { highs_ptr, n_cols }))
+        Ok(Arc::new(HighsModel { highs_ptr, n_cols }))
     }
 
     /// Get or build a model for the given polyhedron
@@ -196,30 +192,33 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<CachedHighsModel>, SolveInputError> {
-        if !self.cache_enabled {
-            // Cache disabled, always build new model
-            return self.build_model(polyhedron, use_presolve);
-        }
+    ) -> Result<Arc<HighsModel>, SolveInputError> {
+        match &self.model_cache {
+            Some(some_model_cache) => {
+                // Check cache first
+                {
+                    let mut cache = some_model_cache.lock();
+                    if let Some(cached_model) = cache.get(polyhedron) {
+                        return Ok(Arc::clone(cached_model));
+                    }
+                }
 
-        // Check cache first
-        {
-            let mut cache = self.model_cache.lock();
-            if let Some(cached_model) = cache.get(polyhedron) {
-                return Ok(Arc::clone(cached_model));
+                // Not in cache, build new model
+                let model = self.build_model(polyhedron, use_presolve)?;
+
+                // Store in cache
+                {
+                    let mut cache = some_model_cache.lock();
+                    cache.put(polyhedron.clone(), Arc::clone(&model));
+                }
+
+                Ok(model)
+            } // Caching enabled, proceed to check cache
+            None => {
+                // Caching disabled, build new model every time
+                return self.build_model(polyhedron, use_presolve);
             }
         }
-
-        // Not in cache, build new model
-        let model = self.build_model(polyhedron, use_presolve)?;
-
-        // Store in cache
-        {
-            let mut cache = self.model_cache.lock();
-            cache.put(polyhedron.clone(), Arc::clone(&model));
-        }
-
-        Ok(model)
     }
 }
 
@@ -292,7 +291,7 @@ impl Solver for HighsSolver {
             // Map solution back to variable names
             let mut solution_map: HashMap<String, i32> = HashMap::new();
             for (col_idx, var) in polyhedron.variables.iter().enumerate() {
-                let value = solution_values[col_idx];
+                let value: f64 = solution_values[col_idx];
                 let rounded_value = value.round() as i32;
                 solution_map.insert(var.id.clone(), rounded_value);
             }
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_cache_reuses_model() {
-        let solver = HighsSolver::with_cache_size(10);
+        let solver = HighsSolver::with_cache_size(Some(10));
         let polyhedron = create_test_polyhedron();
 
         let mut obj1 = HashMap::new();

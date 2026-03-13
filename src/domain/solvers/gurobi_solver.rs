@@ -11,16 +11,15 @@ use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 
 /// Cached Gurobi model structure
-struct CachedGurobiModel {
+struct GurobiModel {
     model: Model,
     vars: Vec<Var>,
-    n_vars: usize,
 }
 
 // SAFETY: Gurobi model is properly synchronized through Arc and Mutex
 // Each model instance is only accessed by one thread at a time
-unsafe impl Send for CachedGurobiModel {}
-unsafe impl Sync for CachedGurobiModel {}
+unsafe impl Send for GurobiModel {}
+unsafe impl Sync for GurobiModel {}
 
 /// Gurobi solver implementation with model caching
 ///
@@ -30,30 +29,27 @@ unsafe impl Sync for CachedGurobiModel {}
 /// - Reuses cached models across multiple objectives
 /// - Thread-safe via parking_lot::Mutex
 pub struct GurobiSolver {
-    model_cache: Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<CachedGurobiModel>>>>>,
-    cache_enabled: bool,
+    model_cache:
+        Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<GurobiModel>>>>>>,
 }
 
 impl GurobiSolver {
-    pub fn new() -> Self {
-        Self::with_cache_size(100)
-    }
 
     /// Create a new Gurobi solver with specified cache size
-    pub fn with_cache_size(size: usize) -> Self {
-        let cache_size = NonZeroUsize::new(size).unwrap_or(NonZeroUsize::new(100).unwrap());
-        GurobiSolver {
-            model_cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
-            cache_enabled: size > 0,
+    pub fn with_cache_size(size: Option<usize>) -> Self {
+        match size {
+            Some(0) | None => Self::without_cache(),
+            Some(s) => GurobiSolver {
+                model_cache: Some(Arc::new(Mutex::new(LruCache::new(
+                    NonZeroUsize::new(s).unwrap(),
+                )))),
+            },
         }
     }
 
     /// Create solver with caching disabled
     pub fn without_cache() -> Self {
-        GurobiSolver {
-            model_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1).unwrap()))),
-            cache_enabled: false,
-        }
+        GurobiSolver { model_cache: None }
     }
 
     /// Convert Gurobi status to our API status
@@ -70,7 +66,7 @@ impl GurobiSolver {
     fn build_model(
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<CachedGurobiModel>>, SolveInputError> {
+    ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
         // Create Gurobi environment
         let mut env = Env::new("").map_err(|e| SolveInputError {
             details: format!("Failed to create Gurobi environment: {}", e),
@@ -171,10 +167,9 @@ impl GurobiSolver {
             details: format!("Failed to update model after adding constraints: {}", e),
         })?;
 
-        Ok(Arc::new(Mutex::new(CachedGurobiModel {
+        Ok(Arc::new(Mutex::new(GurobiModel {
             model,
-            vars,
-            n_vars: polyhedron.variables.len(),
+            vars
         })))
     }
 
@@ -183,30 +178,33 @@ impl GurobiSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<CachedGurobiModel>>, SolveInputError> {
-        if !self.cache_enabled {
-            // Cache disabled, always build new model
-            return Self::build_model(polyhedron, use_presolve);
-        }
+    ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
+        match &self.model_cache {
+            Some(some_model_cache) => {
+                // Check cache first
+                {
+                    let mut cache = some_model_cache.lock();
+                    if let Some(cached_model) = cache.get(polyhedron) {
+                        return Ok(Arc::clone(cached_model));
+                    }
+                }
 
-        // Check cache first
-        {
-            let mut cache = self.model_cache.lock();
-            if let Some(cached_model) = cache.get(polyhedron) {
-                return Ok(Arc::clone(cached_model));
+                // Not in cache, build new model
+                let model = Self::build_model(polyhedron, use_presolve)?;
+
+                // Store in cache
+                {
+                    let mut cache = some_model_cache.lock();
+                    cache.put(polyhedron.clone(), Arc::clone(&model));
+                }
+
+                Ok(model)
+            }
+            None => {
+                // Cache disabled, always build new model
+                Self::build_model(polyhedron, use_presolve)
             }
         }
-
-        // Not in cache, build new model
-        let model = Self::build_model(polyhedron, use_presolve)?;
-
-        // Store in cache
-        {
-            let mut cache = self.model_cache.lock();
-            cache.put(polyhedron.clone(), Arc::clone(&model));
-        }
-
-        Ok(model)
     }
 }
 
