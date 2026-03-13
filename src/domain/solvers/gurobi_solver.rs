@@ -29,12 +29,10 @@ unsafe impl Sync for GurobiModel {}
 /// - Reuses cached models across multiple objectives
 /// - Thread-safe via parking_lot::Mutex
 pub struct GurobiSolver {
-    model_cache:
-        Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<GurobiModel>>>>>>,
+    model_cache: Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<GurobiModel>>>>>>,
 }
 
 impl GurobiSolver {
-
     /// Create a new Gurobi solver with specified cache size
     pub fn with_cache_size(size: Option<usize>) -> Self {
         match size {
@@ -167,10 +165,7 @@ impl GurobiSolver {
             details: format!("Failed to update model after adding constraints: {}", e),
         })?;
 
-        Ok(Arc::new(Mutex::new(GurobiModel {
-            model,
-            vars
-        })))
+        Ok(Arc::new(Mutex::new(GurobiModel { model, vars })))
     }
 
     /// Get or build a model for the given polyhedron

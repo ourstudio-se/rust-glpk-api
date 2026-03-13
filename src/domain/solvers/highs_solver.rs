@@ -45,7 +45,6 @@ pub struct HighsSolver {
 }
 
 impl HighsSolver {
-
     /// Create a new HiGHS solver with specified cache size
     pub fn with_cache_size(size: Option<usize>) -> Self {
         match size {
