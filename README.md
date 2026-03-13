@@ -140,48 +140,6 @@ cargo test --features highs-solver
 SOLVER=highs cargo run --release --features highs-solver
 ```
 
-### Building with Hexaly Support
-
-#### Prerequisites
-
-1. **Install Hexaly**:
-   - Download from [Hexaly Downloads](https://www.hexaly.com/)
-   - Follow the installation instructions for your platform
-   - Obtain a valid license (free academic licenses available)
-
-2. **Set HEXALY_HOME**:
-   ```bash
-   # macOS (example for version 13.0)
-   export HEXALY_HOME=/Applications/hexaly_13_0
-
-   # Linux
-   export HEXALY_HOME=/opt/hexaly_13_0
-   ```
-
-   Add this to your shell profile (`.bashrc`, `.zshrc`, etc.) to make it permanent.
-
-3. **Run setup script** (optional but recommended):
-   ```bash
-   ./setup-hexaly.sh
-   ```
-
-   This script will verify your installation and configure the build environment.
-
-#### Build Commands
-
-```bash
-# Build with Hexaly support
-HEXALY_HOME=/path/to/hexaly cargo build --features hexaly-solver
-
-# Run tests with Hexaly
-HEXALY_HOME=/path/to/hexaly cargo test --features hexaly-solver
-
-# Run in production with Hexaly
-HEXALY_HOME=/path/to/hexaly SOLVER=hexaly cargo run --release --features hexaly-solver
-```
-
-For detailed FFI setup, troubleshooting, and architecture information, see **[hexaly/README.md](hexaly/README.md)**.
-
 ### Building with Gurobi Support
 
 #### Prerequisites
@@ -231,9 +189,6 @@ time SOLVER=highs ./target/release/rust-solver-api
 
 # Test with Gurobi
 time GUROBI_HOME=/path/to/gurobi SOLVER=gurobi ./target/release/rust-solver-api
-
-# Test with Hexaly
-time HEXALY_HOME=/path/to/hexaly SOLVER=hexaly ./target/release/rust-solver-api
 ```
 
 ### API Compatibility
@@ -367,9 +322,8 @@ This standard formulation allows you to express a wide variety of optimization p
 
 - `PORT` - Server port (default: 9000)
 - `JSON_PAYLOAD_LIMIT` - Maximum request size (default: 2MB)
-- `SOLVER` - Solver backend: `glpk` (default), `highs`, `gurobi`, or `hexaly`
+- `SOLVER` - Solver backend: `glpk` (default), `highs`, `gurobi`
 - `GUROBI_HOME` - Path to Gurobi installation (required for Gurobi solver)
-- `HEXALY_HOME` - Path to Hexaly installation (required for Hexaly solver)
 - `USE_PRESOLVE` - Enable/disable presolve optimization: `true` (default) or `false`
 
 ### Using .env file
