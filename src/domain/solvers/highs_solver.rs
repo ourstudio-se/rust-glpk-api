@@ -10,6 +10,7 @@ use std::sync::Arc;
 use highs_sys::*;
 use lru::LruCache;
 use parking_lot::Mutex;
+// use std::sync::Mutex;
 use std::num::NonZeroUsize;
 
 /// Cached HiGHS model structure
@@ -18,8 +19,8 @@ struct HighsModel {
     n_cols: i32,
 }
 
-// SAFETY: HiGHS model pointer is properly synchronized through Arc and Mutex
-// Each model instance is only accessed by one thread at a time
+// SAFETY: HiGHS model pointer is only accessed while holding a Mutex.
+// We wrap `HighsModel` in `Arc<Mutex<...>>` to ensure exclusive access
 unsafe impl Send for HighsModel {}
 unsafe impl Sync for HighsModel {}
 
@@ -41,7 +42,7 @@ impl Drop for HighsModel {
 /// - Reuses cached models across multiple objectives
 /// - Thread-safe via parking_lot::Mutex
 pub struct HighsSolver {
-    model_cache: Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<HighsModel>>>>>,
+    model_cache: Option<Arc<Mutex<LruCache<SparseLEIntegerPolyhedron, Arc<Mutex<HighsModel>>>>>>,
 }
 
 impl HighsSolver {
@@ -84,7 +85,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<HighsModel>, SolveInputError> {
+    ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
         let n_rows = polyhedron.a.shape.nrows as i32;
         let n_cols = polyhedron.variables.len() as i32;
 
@@ -183,7 +184,7 @@ impl HighsSolver {
             }
         }
 
-        Ok(Arc::new(HighsModel { highs_ptr, n_cols }))
+        Ok(Arc::new(Mutex::new(HighsModel { highs_ptr, n_cols })))
     }
 
     /// Get or build a model for the given polyhedron
@@ -191,7 +192,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<HighsModel>, SolveInputError> {
+    ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
         match &self.model_cache {
             Some(some_model_cache) => {
                 // Check cache first
@@ -224,17 +225,19 @@ impl HighsSolver {
 impl Solver for HighsSolver {
     fn solve(
         &self,
-        polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
+        polyhedron: SparseLEIntegerPolyhedron,
+        objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
     ) -> Result<Vec<ApiSolution>, SolveInputError> {
         // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
+        let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
+        validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
-        // Get or build cached model
-        let model = self.get_or_build_model(polyhedron, use_presolve)?;
+        // Get or build cached model, then lock mutex for entire solve call
+        let model_mutex = self.get_or_build_model(&polyhedron, use_presolve)?;
+        let model = model_mutex.lock();
+
         let highs_ptr = model.highs_ptr;
         let n_cols = model.n_cols;
 
@@ -362,19 +365,29 @@ mod tests {
 
         // First solve - should build model
         let result1 = solver.solve(
-            &polyhedron,
-            &[obj1.clone()],
+            polyhedron.clone(),
+            vec![obj1.clone()],
             SolverDirection::Maximize,
             true,
         );
         assert!(result1.is_ok());
 
         // Second solve with same polyhedron, different objective - should reuse cached model
-        let result2 = solver.solve(&polyhedron, &[obj2], SolverDirection::Maximize, true);
+        let result2 = solver.solve(
+            polyhedron.clone(),
+            vec![obj2],
+            SolverDirection::Maximize,
+            true,
+        );
         assert!(result2.is_ok());
 
         // Third solve with same polyhedron and objective - should still work
-        let result3 = solver.solve(&polyhedron, &[obj1], SolverDirection::Maximize, true);
+        let result3 = solver.solve(
+            polyhedron.clone(),
+            vec![obj1],
+            SolverDirection::Maximize,
+            true,
+        );
         assert!(result3.is_ok());
     }
 
@@ -387,7 +400,7 @@ mod tests {
         obj.insert("x".to_string(), 1.0);
         obj.insert("y".to_string(), 2.0);
 
-        let result = solver.solve(&polyhedron, &[obj], SolverDirection::Maximize, true);
+        let result = solver.solve(polyhedron, vec![obj], SolverDirection::Maximize, true);
         assert!(result.is_ok());
     }
 }

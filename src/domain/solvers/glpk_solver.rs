@@ -30,15 +30,15 @@ impl GlpkSolver {
 impl Solver for GlpkSolver {
     fn solve(
         &self,
-        polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
+        polyhedron: SparseLEIntegerPolyhedron,
+        objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         _use_presolve: bool,
     ) -> Result<Vec<ApiSolution>, SolveInputError> {
-        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
+        let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
 
         // Validate objectives against variables
-        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
+        validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Convert to borrowed objectives for GLPK
         let borrowed_objectives: Vec<HashMap<&str, f64>> = objectives

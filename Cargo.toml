@@ -10,6 +10,7 @@ gurobi-solver = ["grb"]
 
 [dependencies]
 actix-web = "4.11.0"
+tokio = "1.50"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dotenv = "0.15.0"

@@ -35,12 +35,32 @@ pub async fn solve(
         Err(response) => return response,
     }
 
-    match solver.solve(
-        &req.polyhedron,
-        &req.objectives,
-        req.direction,
-        *use_presolve.as_ref(),
-    ) {
+    let request = req.0;
+    let polyhedron = request.polyhedron;
+    let objectives = request.objectives;
+
+    let solve_task_result = tokio::task::spawn_blocking(move || {
+        solver.solve(
+            polyhedron,
+            objectives,
+            request.direction,
+            *use_presolve.get_ref(),
+        )
+    })
+    .await;
+
+    let solve_result = match solve_task_result {
+        Err(e) => {
+            let msg = format!("Solver thread did not complete: {}", e);
+            sentry::capture_message(&msg, sentry::Level::Error);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": msg,
+            }));
+        }
+        Ok(res) => res,
+    };
+
+    match solve_result {
         Ok(api_solutions) => {
             HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
         }

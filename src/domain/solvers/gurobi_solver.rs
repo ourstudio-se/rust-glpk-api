@@ -206,17 +206,17 @@ impl GurobiSolver {
 impl Solver for GurobiSolver {
     fn solve(
         &self,
-        polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
+        polyhedron: SparseLEIntegerPolyhedron,
+        objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
     ) -> std::result::Result<Vec<ApiSolution>, SolveInputError> {
         // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, objectives)?;
+        let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
+        validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Get or build cached model
-        let cached_model = self.get_or_build_model(polyhedron, use_presolve)?;
+        let cached_model = self.get_or_build_model(&polyhedron, use_presolve)?;
         let mut model_lock = cached_model.lock();
 
         let sense = match direction {
