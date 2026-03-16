@@ -28,19 +28,19 @@ pub struct ApiSolution {
 
 // ---------- API (wire) types: owned & serde-friendly ----------
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct ApiVariable {
     pub id: String,
     pub bound: Bound, // (i32, i32) from glpk_rust
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct ApiShape {
     pub nrows: usize,
     pub ncols: usize,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct ApiIntegerSparseMatrix {
     pub rows: Vec<i32>,
     pub cols: Vec<i32>,
@@ -48,7 +48,7 @@ pub struct ApiIntegerSparseMatrix {
     pub shape: ApiShape,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum SolverDirection {
     Maximize,
@@ -64,7 +64,7 @@ pub struct SolveRequest {
     pub direction: SolverDirection,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct SparseLEIntegerPolyhedron {
     #[serde(rename = "A")]
     pub a: ApiIntegerSparseMatrix,

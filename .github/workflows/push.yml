@@ -61,6 +61,8 @@ jobs:
       - name: Build container
         uses: docker/build-push-action@v4
         with:
+          context: .
+          file: deploy/Dockerfile
           tags: localbuild/rust-glpk-api:latest
           push: false
           load: true

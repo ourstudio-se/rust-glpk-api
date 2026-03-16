@@ -1,0 +1,82 @@
+name: Publish Docker Images to DockerHub
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  push-glpk:
+    name: Build and push GLPK image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push GLPK image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.glpk
+          platforms: linux/amd64,linux/arm64
+          tags: ourstudio/rust-multi-solver-api:glpk,ourstudio/rust-multi-solver-api:glpk-latest
+          push: true
+
+  push-highs:
+    name: Build and push HiGHS image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push HiGHS image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.highs
+          platforms: linux/amd64,linux/arm64
+          tags: ourstudio/rust-multi-solver-api:highs,ourstudio/rust-multi-solver-api:highs-latest
+          push: true
+
+  push-multi:
+    name: Build and push Multi-solver image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Multi-solver image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.multi
+          platforms: linux/amd64,linux/arm64
+          tags: ourstudio/rust-multi-solver-api:latest,ourstudio/rust-multi-solver-api:multi
+          push: true

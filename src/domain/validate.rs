@@ -6,15 +6,15 @@ pub struct SolveInputError {
     pub details: String,
 }
 
-pub fn validate_objectives(
+pub fn validate_objectives_owned(
     variables: &Vec<Variable>,
-    objectives: &Vec<HashMap<&str, f64>>,
+    objectives: &[HashMap<String, f64>],
 ) -> Result<(), SolveInputError> {
     let variable_ids: HashSet<&str> = variables.iter().map(|v| v.id).collect();
 
     for objective in objectives {
         for objective_variable_id in objective.keys() {
-            if !variable_ids.contains(objective_variable_id) {
+            if !variable_ids.contains(objective_variable_id.as_str()) {
                 return Err(SolveInputError {
                     details: format!(
                         "Objective contains missing variable {}",
@@ -44,8 +44,11 @@ mod tests {
                 bound: (0, 1),
             },
         ];
-        let objectives = vec![HashMap::from([("x1", 1.0), ("x2", 2.0)])];
-        assert!(validate_objectives(&variables, &objectives).is_ok());
+        let objectives = vec![HashMap::from([
+            ("x1".to_string(), 1.0),
+            ("x2".to_string(), 2.0),
+        ])];
+        assert!(validate_objectives_owned(&variables, &objectives).is_ok());
     }
 
     #[test]
@@ -60,7 +63,10 @@ mod tests {
                 bound: (0, 1),
             },
         ];
-        let objectives = vec![HashMap::from([("x1", 1.0), ("missing", 2.0)])];
-        assert!(validate_objectives(&variables, &objectives).is_err());
+        let objectives = vec![HashMap::from([
+            ("x1".to_string(), 1.0),
+            ("missing".to_string(), 2.0),
+        ])];
+        assert!(validate_objectives_owned(&variables, &objectives).is_err());
     }
 }

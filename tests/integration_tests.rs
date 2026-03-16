@@ -24,11 +24,11 @@ impl TestServer {
             .expect("Failed to start test server");
 
         // Wait longer for server to start
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(10));
 
         // Test if server is responding with better error handling
         let mut server_ready = false;
-        for attempt in 0..15 {
+        for attempt in 0..30 {
             if let Ok(output) = std::process::Command::new("curl")
                 .args(&[
                     "-s",
