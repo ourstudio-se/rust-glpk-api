@@ -38,14 +38,9 @@ pub async fn solve(
     let request = req.0;
     let polyhedron = request.polyhedron;
     let objectives = request.objectives;
-
+    let direction = request.direction;
     let solve_task_result = tokio::task::spawn_blocking(move || {
-        solver.solve(
-            polyhedron,
-            objectives,
-            request.direction,
-            *use_presolve.get_ref(),
-        )
+        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref())
     })
     .await;
 
