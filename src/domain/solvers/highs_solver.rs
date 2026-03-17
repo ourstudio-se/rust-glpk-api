@@ -305,7 +305,7 @@ impl Solver for HighsSolver {
 
             solutions.push(ApiSolution {
                 status: api_status,
-                objective: objective_value.round() as i32,
+                objective: objective_value.round() as i64,
                 solution: solution_map,
                 error: None,
             });
