@@ -36,10 +36,6 @@ pub async fn solve(
         Err(response) => return response,
     }
 
-    let polyhedron = req.0.polyhedron;
-    let objectives = req.0.objectives;
-    let direction = req.0.direction;
-
     // Acquire an owned permit asynchronously before spawning the blocking task.
     let sem = solver_semaphore.get_ref().clone();
     let permit = match sem.acquire_owned().await {
@@ -51,6 +47,11 @@ pub async fn solve(
         }
     };
 
+    let SolveRequest {
+        polyhedron,
+        objectives,
+        direction,
+    } = req.into_inner();
     let solve_task_result = tokio::task::spawn_blocking(move || {
         // Hold the permit for the duration of the blocking solver call by moving
         // it into the closure. It will be released automatically when dropped.
@@ -355,11 +356,11 @@ async fn main() -> std::io::Result<()> {
 
     let max_blocking_threads = env::var("MAX_BLOCKING_THREADS")
         .ok()
-        .and_then(|s| s.parse::<usize>().ok())
+        .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(1);
     let solver_semaphore = match max_blocking_threads {
-        0 => panic!("MAX_BLOCKING_THREADS must be >= 1"),
-        n => Arc::new(tokio::sync::Semaphore::new(n)),
+        n if n < 1 => panic!("MAX_BLOCKING_THREADS must be >= 1"),
+        n => Arc::new(tokio::sync::Semaphore::new(n as usize)),
     };
 
     HttpServer::new(move || {

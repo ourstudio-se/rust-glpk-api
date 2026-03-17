@@ -18,9 +18,14 @@ struct HighsModel {
     n_cols: i32,
 }
 
-// `HighsModel` is wrapped in `Arc<Mutex<...>>`, so Send + Sync is ok
+// `HighsModel` contains a raw pointer to a HiGHS instance, which is
+// not intrinsically thread-safe. We declare `HighsModel` as `Send`
+// because it is only ever used behind a `Mutex`, e.g. via
+// `Arc<Mutex<HighsModel>>` in `HighsSolver::model_cache`. All accesses to
+// `highs_ptr` must be performed while holding that mutex, ensuring that the
+// underlying HiGHS instance is never used concurrently from multiple threads
+// and is not accessed outside this synchronized context.
 unsafe impl Send for HighsModel {}
-unsafe impl Sync for HighsModel {}
 
 impl Drop for HighsModel {
     fn drop(&mut self) {
