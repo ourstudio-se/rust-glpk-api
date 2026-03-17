@@ -10,7 +10,6 @@ use std::sync::Arc;
 use highs_sys::*;
 use lru::LruCache;
 use parking_lot::Mutex;
-// use std::sync::Mutex;
 use std::num::NonZeroUsize;
 
 /// Cached HiGHS model structure
@@ -19,8 +18,7 @@ struct HighsModel {
     n_cols: i32,
 }
 
-// SAFETY: HiGHS model pointer is only accessed while holding a Mutex.
-// We wrap `HighsModel` in `Arc<Mutex<...>>` to ensure exclusive access
+// `HighsModel` is wrapped in `Arc<Mutex<...>>`, so Send + Sync is ok
 unsafe impl Send for HighsModel {}
 unsafe impl Sync for HighsModel {}
 
