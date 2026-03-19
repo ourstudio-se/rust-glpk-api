@@ -916,9 +916,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "glpk-rust"
-version = "0.1.13"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd145f2020224b83aabe238b76bbc461e516fb38885a4686f171305a8e35f2fd"
+checksum = "29a396751c90c42f0da9df8b988522deb441ddb911c7f08b8dea837ff378f590"
 dependencies = [
  "cc",
  "cmake",
@@ -2102,7 +2102,7 @@ dependencies = [
 
 [[package]]
 name = "rust-solver-api"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "actix-web",
  "dotenv",

@@ -122,7 +122,7 @@ pub struct Solution {
     /// Solution status
     pub status: Status,
     /// Objective value achieved
-    pub objective: i32,
+    pub objective: f64,
     /// Variable assignments
     pub solution: HashMap<String, i64>,
     /// Error message, if any
