@@ -29,18 +29,54 @@ pub async fn solve(
     req: web::Json<SolveRequest>,
     solver: web::Data<Box<dyn Solver>>,
     use_presolve: web::Data<bool>,
+    solver_semaphore: web::Data<Arc<tokio::sync::Semaphore>>,
 ) -> impl Responder {
     match validate_solve_request(&req) {
         Ok(_) => (),
         Err(response) => return response,
     }
 
-    match solver.solve(
-        &req.polyhedron,
-        &req.objectives,
-        req.direction,
-        *use_presolve.as_ref(),
-    ) {
+    // Acquire an owned permit asynchronously before spawning the blocking task.
+    let sem = solver_semaphore.get_ref().clone();
+    let permit = match sem.acquire_owned().await {
+        Ok(p) => p,
+        Err(e) => {
+            sentry::capture_message(
+                &format!("Failed to acquire semaphore permit: {}", e),
+                sentry::Level::Error,
+            );
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Something went wrong"}));
+        }
+    };
+
+    let SolveRequest {
+        polyhedron,
+        objectives,
+        direction,
+    } = req.into_inner();
+    let solve_task_result = tokio::task::spawn_blocking(move || {
+        // Hold the permit for the duration of the blocking solver call by moving
+        // it into the closure. It will be released automatically when dropped.
+        let _permit = permit;
+        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref())
+    })
+    .await;
+
+    let solve_result = match solve_task_result {
+        Err(e) => {
+            sentry::capture_message(
+                &format!("Solver thread did not complete successfully: {}", e),
+                sentry::Level::Error,
+            );
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Something went wrong",
+            }));
+        }
+        Ok(res) => res,
+    };
+
+    match solve_result {
         Ok(api_solutions) => {
             HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
         }
@@ -318,12 +354,27 @@ async fn main() -> std::io::Result<()> {
     let solver_data = web::Data::new(solver);
     let presolve_data = web::Data::new(use_presolve);
 
+    // Configure maximum concurrent blocking solver threads via env var.
+    // Default to 1 unless the user supplies a value. If the env var is set
+    // but invalid (non-integer or < 1) the server will panic with an error
+    // to avoid silently running with unexpected configuration.
+
+    let max_blocking_threads = env::var("MAX_BLOCKING_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
+    let solver_semaphore = match max_blocking_threads {
+        n if n < 1 => panic!("MAX_BLOCKING_THREADS must be >= 1"),
+        n => Arc::new(tokio::sync::Semaphore::new(n as usize)),
+    };
+
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
             .wrap(Condition::new(sentry_enabled, Sentry::new()))
             .app_data(solver_data.clone())
             .app_data(presolve_data.clone())
+            .app_data(web::Data::new(solver_semaphore.clone()))
             .app_data(
                 web::JsonConfig::default()
                     .limit(json_limit)

@@ -199,6 +199,22 @@ time GUROBI_HOME=/path/to/gurobi SOLVER=gurobi ./target/release/rust-solver-api
 
 Visit `http://localhost:9000/docs` for interactive API documentation, or simply go to `http://localhost:9000` (automatically redirects to docs).
 
+## Configuration
+
+Control runtime behavior with environment variables. Relevant settings:
+
+- `MAX_BLOCKING_THREADS` — Limits the number of concurrent CPU-bound solver tasks executed via `spawn_blocking`.
+  - Default: `1` (single concurrent blocking solver task).
+
+Example:
+
+```bash
+export MAX_BLOCKING_THREADS=2
+cargo run --release
+```
+
+Other environment variables (see `src/main.rs`) control port, JSON limits, Sentry, and solver selection.
+
 ## 🔗 Endpoints
 
 - `GET /` - Redirects to documentation

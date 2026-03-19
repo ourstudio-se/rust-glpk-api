@@ -16,8 +16,8 @@ pub trait Solver: Send + Sync {
     /// A vector of solutions, one for each objective function
     fn solve(
         &self,
-        polyhedron: &SparseLEIntegerPolyhedron,
-        objectives: &[HashMap<String, f64>],
+        polyhedron: SparseLEIntegerPolyhedron,
+        objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
     ) -> Result<Vec<ApiSolution>, SolveInputError>;
