@@ -21,7 +21,7 @@ pub enum Status {
 #[derive(Serialize, Deserialize)]
 pub struct ApiSolution {
     pub status: Status,
-    pub objective: i64, // matches glpk_rust’s current output
+    pub objective: f64,
     pub solution: HashMap<String, i32>,
     pub error: Option<String>,
 }

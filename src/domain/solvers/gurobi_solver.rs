@@ -290,7 +290,7 @@ impl Solver for GurobiSolver {
 
             solutions.push(ApiSolution {
                 status,
-                objective: objective_value.round() as i32,
+                objective: objective_value,
                 solution: solution_map,
                 error: None,
             });

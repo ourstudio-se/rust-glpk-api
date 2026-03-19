@@ -264,7 +264,7 @@ impl Solver for HighsSolver {
             if status != 0 {
                 solutions.push(ApiSolution {
                     status: Status::Undefined,
-                    objective: 0,
+                    objective: 0.0,
                     solution: HashMap::new(),
                     error: Some(format!("HiGHS solve failed with status {}", status)),
                 });
@@ -305,7 +305,7 @@ impl Solver for HighsSolver {
 
             solutions.push(ApiSolution {
                 status: api_status,
-                objective: objective_value.round() as i64,
+                objective: objective_value,
                 solution: solution_map,
                 error: None,
             });
@@ -389,5 +389,69 @@ mod tests {
 
         let result = solver.solve(&polyhedron, &[obj], SolverDirection::Maximize, true);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_highs_tolerance() {
+        let solver = HighsSolver::without_cache();
+        let polyhedron = SparseLEIntegerPolyhedron {
+            a: crate::models::ApiIntegerSparseMatrix {
+                rows: vec![0, 0, 0],
+                cols: vec![0, 1, 2],
+                vals: vec![-1, -1, 1],
+                shape: crate::models::ApiShape { nrows: 1, ncols: 3 },
+            },
+            b: vec![-1],
+            variables: vec![
+                crate::models::ApiVariable {
+                    id: "x".to_string(),
+                    bound: (0, 1),
+                },
+                crate::models::ApiVariable {
+                    id: "y".to_string(),
+                    bound: (0, 1),
+                },
+                crate::models::ApiVariable {
+                    id: "z".to_string(),
+                    bound: (0, 1),
+                },
+            ],
+        };
+        // Highs has a strong limit of 52 bits of precision for integer problems,
+        // so we test with a large coefficient that is still within that limit to ensure it can handle it without numerical issues.
+        const EXP_TOL_MAX: i32 = 52;
+        let direction = SolverDirection::Maximize;
+        let objective = HashMap::from([
+            ("x".to_string(), 2f64.powi(EXP_TOL_MAX)),
+            ("y".to_string(), 1.0),
+            ("z".to_string(), 1.0),
+        ]);
+        let api_solutions = solver
+            .solve(&polyhedron, &[objective], direction, false)
+            .ok()
+            .unwrap();
+        let api_solution = &api_solutions[0];
+        assert_eq!(api_solution.objective, 2f64.powi(EXP_TOL_MAX) + 2.0);
+        assert_eq!(api_solution.solution.get("x"), Some(&1));
+        assert_eq!(api_solution.solution.get("y"), Some(&1));
+        assert_eq!(api_solution.solution.get("z"), Some(&1));
+
+        // So this test should return a not correct objective value for the solution
+        // However, the solution is correct!
+        let direction = SolverDirection::Maximize;
+        let objective = HashMap::from([
+            ("x".to_string(), 2f64.powi(EXP_TOL_MAX + 1)),
+            ("y".to_string(), 1.0),
+            ("z".to_string(), 1.0),
+        ]);
+        let api_solutions = solver
+            .solve(&polyhedron, &[objective], direction, false)
+            .ok()
+            .unwrap();
+        let api_solution = &api_solutions[0];
+        assert_eq!(api_solution.objective, 2f64.powi(EXP_TOL_MAX + 1));
+        assert_eq!(api_solution.solution.get("x"), Some(&1));
+        assert_eq!(api_solution.solution.get("y"), Some(&1));
+        assert_eq!(api_solution.solution.get("z"), Some(&1));
     }
 }
