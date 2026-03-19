@@ -191,7 +191,7 @@ impl HighsSolver {
     }
 
     /// Get or build a model for the given polyhedron
-    fn get_or_build_model(
+    fn obtain_model(
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
@@ -238,7 +238,7 @@ impl Solver for HighsSolver {
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Get or build cached model, then lock mutex for entire solve call
-        let model_mutex = self.get_or_build_model(&polyhedron, use_presolve)?;
+        let model_mutex = self.obtain_model(&polyhedron, use_presolve)?;
         let model = model_mutex.lock();
 
         let highs_ptr = model.highs_ptr;

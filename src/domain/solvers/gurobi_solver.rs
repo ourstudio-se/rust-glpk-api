@@ -169,7 +169,7 @@ impl GurobiSolver {
     }
 
     /// Get or build a model for the given polyhedron
-    fn get_or_build_model(
+    fn obtain_model(
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
@@ -216,7 +216,7 @@ impl Solver for GurobiSolver {
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Get or build cached model
-        let cached_model = self.get_or_build_model(&polyhedron, use_presolve)?;
+        let cached_model = self.obtain_model(&polyhedron, use_presolve)?;
         let mut model_lock = cached_model.lock();
 
         let sense = match direction {

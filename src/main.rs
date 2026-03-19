@@ -41,9 +41,12 @@ pub async fn solve(
     let permit = match sem.acquire_owned().await {
         Ok(p) => p,
         Err(e) => {
-            let msg = format!("Failed to acquire semaphore permit: {}", e);
-            sentry::capture_message(&msg, sentry::Level::Error);
-            return HttpResponse::InternalServerError().json(serde_json::json!({ "error": msg }));
+            sentry::capture_message(
+                &format!("Failed to acquire semaphore permit: {}", e),
+                sentry::Level::Error,
+            );
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Something went wrong"}));
         }
     };
 
@@ -62,10 +65,12 @@ pub async fn solve(
 
     let solve_result = match solve_task_result {
         Err(e) => {
-            let msg = format!("Solver thread did not complete: {}", e);
-            sentry::capture_message(&msg, sentry::Level::Error);
+            sentry::capture_message(
+                &format!("Solver thread did not complete successfully: {}", e),
+                sentry::Level::Error,
+            );
             return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": msg,
+                "error": "Something went wrong",
             }));
         }
         Ok(res) => res,
