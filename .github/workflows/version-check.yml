@@ -1,0 +1,31 @@
+name: Check Version Bump
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-version-bump:
+    name: Check Cargo.toml version bumped
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+
+      - name: Compare versions
+        run: |
+          HEAD_VER=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          BASE_VER=$(git show origin/${{ github.event.pull_request.base.ref }}:Cargo.toml \
+            | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n1)
+          echo "PR version: $HEAD_VER"
+          echo "Base version: $BASE_VER"
+          if [ "$HEAD_VER" = "$BASE_VER" ]; then
+            echo "Version was not bumped (still $HEAD_VER). Please bump Cargo.toml version." >&2
+            exit 1
+          fi
