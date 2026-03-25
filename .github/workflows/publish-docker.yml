@@ -4,11 +4,31 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
+  get-version:
+    name: Get crate version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Extract version
+        id: extract
+        run: |
+          VERSION=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ -z "$VERSION" ]; then
+            echo "No version found in Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   push-glpk:
     name: Build and push GLPK image
     runs-on: ubuntu-24.04
+    needs: get-version
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,12 +48,15 @@ jobs:
           context: .
           file: deploy/Dockerfile.glpk
           platforms: linux/amd64,linux/arm64
-          tags: ourstudio/rust-multi-solver-api:glpk,ourstudio/rust-multi-solver-api:glpk-latest
+          tags: |
+            ourstudio/rust-multi-solver-api:glpk-latest
+            ourstudio/rust-multi-solver-api:glpk-${{ needs.get-version.outputs.version }}
           push: true
 
   push-highs:
     name: Build and push HiGHS image
     runs-on: ubuntu-24.04
+    needs: get-version
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,12 +76,15 @@ jobs:
           context: .
           file: deploy/Dockerfile.highs
           platforms: linux/amd64,linux/arm64
-          tags: ourstudio/rust-multi-solver-api:highs,ourstudio/rust-multi-solver-api:highs-latest
+          tags: |
+            ourstudio/rust-multi-solver-api:highs-latest
+            ourstudio/rust-multi-solver-api:highs-${{ needs.get-version.outputs.version }}
           push: true
 
   push-multi:
     name: Build and push Multi-solver image
     runs-on: ubuntu-24.04
+    needs: get-version
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,5 +104,7 @@ jobs:
           context: .
           file: deploy/Dockerfile.multi
           platforms: linux/amd64,linux/arm64
-          tags: ourstudio/rust-multi-solver-api:latest,ourstudio/rust-multi-solver-api:multi
+          tags: |
+            ourstudio/rust-multi-solver-api:latest
+            ourstudio/rust-multi-solver-api:${{ needs.get-version.outputs.version }}
           push: true
