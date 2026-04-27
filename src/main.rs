@@ -29,6 +29,7 @@ pub async fn solve(
     req: web::Json<SolveRequest>,
     solver: web::Data<Box<dyn Solver>>,
     use_presolve: web::Data<bool>,
+    time_limit: web::Data<Option<f64>>,
     solver_semaphore: web::Data<Arc<tokio::sync::Semaphore>>,
 ) -> impl Responder {
     match validate_solve_request(&req) {
@@ -55,13 +56,42 @@ pub async fn solve(
         objectives,
         direction,
     } = req.into_inner();
-    let solve_task_result = tokio::task::spawn_blocking(move || {
+
+    // Clone time_limit value before moving into closure
+    let time_limit_value = *time_limit.get_ref();
+
+    // Wrap the solver call with optional timeout
+    let solve_task = tokio::task::spawn_blocking(move || {
         // Hold the permit for the duration of the blocking solver call by moving
         // it into the closure. It will be released automatically when dropped.
         let _permit = permit;
-        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref())
-    })
-    .await;
+        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref(), time_limit_value)
+    });
+
+    let solve_task_result = match time_limit_value {
+        Some(limit) => {
+            // Apply timeout wrapper
+            match tokio::time::timeout(
+                std::time::Duration::from_secs_f64(limit),
+                solve_task
+            ).await {
+                Ok(result) => result,
+                Err(_) => {
+                    sentry::capture_message(
+                        &format!("Solver exceeded time limit of {} seconds", limit),
+                        sentry::Level::Warning,
+                    );
+                    return HttpResponse::RequestTimeout().json(serde_json::json!({
+                        "error": format!("Solver exceeded time limit of {} seconds", limit),
+                    }));
+                }
+            }
+        }
+        None => {
+            // No timeout, just await the task
+            solve_task.await
+        }
+    };
 
     let solve_result = match solve_task_result {
         Err(e) => {
@@ -333,6 +363,11 @@ async fn main() -> std::io::Result<()> {
         .ok()
         .and_then(|s| s.parse::<usize>().ok());
 
+    // Configure solver time limit in seconds (default: None = no limit)
+    let time_limit = env::var("SOLVER_TIME_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok());
+
     let solver = create_solver_with_cache(solver_type, cache_size);
 
     println!(
@@ -344,6 +379,10 @@ async fn main() -> std::io::Result<()> {
         "Presolve: {}",
         if use_presolve { "enabled" } else { "disabled" }
     );
+    match time_limit {
+        Some(tl) => println!("Solver time limit: {} seconds", tl),
+        None => println!("Solver time limit: disabled"),
+    }
     match cache_size {
         Some(cs) => println!("LRU Model builder cache: {} entries", cs),
         None => println!("LRU Model builder cache: disabled"),
@@ -353,6 +392,7 @@ async fn main() -> std::io::Result<()> {
     // Clone solver and presolve flag for use in the closure
     let solver_data = web::Data::new(solver);
     let presolve_data = web::Data::new(use_presolve);
+    let time_limit_data = web::Data::new(time_limit);
 
     // Configure maximum concurrent blocking solver threads via env var.
     // Default to 1 unless the user supplies a value. If the env var is set
@@ -374,6 +414,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Condition::new(sentry_enabled, Sentry::new()))
             .app_data(solver_data.clone())
             .app_data(presolve_data.clone())
+            .app_data(time_limit_data.clone())
             .app_data(web::Data::new(solver_semaphore.clone()))
             .app_data(
                 web::JsonConfig::default()

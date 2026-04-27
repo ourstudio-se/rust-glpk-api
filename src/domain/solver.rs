@@ -11,6 +11,7 @@ pub trait Solver: Send + Sync {
     /// * `objectives` - List of objective functions to optimize
     /// * `direction` - Maximize or Minimize
     /// * `use_presolve` - Enable/disable presolve optimization
+    /// * `time_limit` - Optional time limit in seconds (None = no limit)
     ///
     /// # Returns
     /// A vector of solutions, one for each objective function
@@ -20,6 +21,7 @@ pub trait Solver: Send + Sync {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Vec<ApiSolution>, SolveInputError>;
 
     /// Get the solver name for logging/debugging

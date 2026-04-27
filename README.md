@@ -341,6 +341,7 @@ This standard formulation allows you to express a wide variety of optimization p
 - `SOLVER` - Solver backend: `glpk` (default), `highs`, `gurobi`
 - `GUROBI_HOME` - Path to Gurobi installation (required for Gurobi solver)
 - `USE_PRESOLVE` - Enable/disable presolve optimization: `true` (default) or `false`
+- `SOLVER_TIME_LIMIT` - Maximum solver execution time in seconds (default: no limit)
 
 ### Using .env file
 
@@ -351,6 +352,7 @@ PORT=8080
 JSON_PAYLOAD_LIMIT=5242880
 SOLVER=glpk
 USE_PRESOLVE=true
+SOLVER_TIME_LIMIT=300  # 5 minutes
 # For Gurobi:
 # GUROBI_HOME=/Library/gurobi1301/macos_universal2
 # SOLVER=gurobi
@@ -378,6 +380,32 @@ USE_PRESOLVE=false cargo run
 ```
 
 **Note**: GLPK uses its own presolve configuration internally and ignores this setting.
+
+### ⏱️ Time Limit Configuration
+
+You can set a maximum execution time for solver operations using the `SOLVER_TIME_LIMIT` environment variable. This helps prevent long-running optimization problems from consuming excessive resources.
+
+```bash
+# Set a 5-minute (300 second) time limit
+SOLVER_TIME_LIMIT=300 cargo run
+
+# Set a 30-second time limit for testing
+SOLVER_TIME_LIMIT=30 cargo run
+
+# No time limit (default)
+cargo run
+```
+
+**Solver Support**:
+- **Gurobi**: ✅ Fully supported - solver-native time limit
+- **HiGHS**: ✅ Fully supported - solver-native time limit
+- **GLPK**: ✅ Supported via application-level timeout wrapper
+
+**Behavior**:
+- **Gurobi/HiGHS**: When the time limit is reached, the solver gracefully stops and returns the best solution found so far. The solution status may be "Feasible" rather than "Optimal" if stopped early.
+- **GLPK**: When the time limit is reached, the request is terminated and a 408 Request Timeout error is returned. The GLPK solver cannot be interrupted gracefully, so no partial solution is available.
+- Time is measured in wall-clock seconds (not CPU time)
+- Setting no limit allows the solver to run until it finds an optimal solution or determines the problem is infeasible/unbounded
 
 ### 📊 Sentry Monitoring
 

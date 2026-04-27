@@ -34,6 +34,7 @@ impl Solver for GlpkSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         _use_presolve: bool,
+        _time_limit: Option<f64>,
     ) -> Result<Vec<ApiSolution>, SolveInputError> {
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
 
@@ -50,6 +51,9 @@ impl Solver for GlpkSolver {
 
         // Solver expects &mut
         let mut mut_polyhedron = glpk_polyhedron;
+
+        // Note: Time limit for GLPK is enforced at the application level via Tokio timeout
+        // in main.rs, not at the solver level (would require upstream library changes)
 
         // Call the GLPK library solver
         let lib_solutions: Vec<Solution> = glpk_solve_ilps(

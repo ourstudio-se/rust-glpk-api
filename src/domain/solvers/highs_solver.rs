@@ -88,6 +88,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
         let n_rows = polyhedron.a.shape.nrows as i32;
         let n_cols = polyhedron.variables.len() as i32;
@@ -109,6 +110,12 @@ impl HighsSolver {
             };
             let option_name = CString::new("presolve").unwrap();
             Highs_setStringOptionValue(highs_ptr, option_name.as_ptr(), presolve_str.as_ptr());
+
+            // Set time limit if specified (in seconds)
+            if let Some(limit) = time_limit {
+                let time_limit_option = CString::new("time_limit").unwrap();
+                Highs_setDoubleOptionValue(highs_ptr, time_limit_option.as_ptr(), limit);
+            }
 
             // Disable output
             let output_flag = CString::new("output_flag").unwrap();
@@ -195,6 +202,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
         match &self.model_cache {
             Some(some_model_cache) => {
@@ -207,7 +215,7 @@ impl HighsSolver {
                 }
 
                 // Not in cache, build new model
-                let model = self.build_model(polyhedron, use_presolve)?;
+                let model = self.build_model(polyhedron, use_presolve, time_limit)?;
 
                 // Store in cache
                 {
@@ -219,7 +227,7 @@ impl HighsSolver {
             } // Caching enabled, proceed to check cache
             None => {
                 // Caching disabled, build new model every time
-                return self.build_model(polyhedron, use_presolve);
+                return self.build_model(polyhedron, use_presolve, time_limit);
             }
         }
     }
@@ -232,13 +240,14 @@ impl Solver for HighsSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Vec<ApiSolution>, SolveInputError> {
         // Use GLPK polyhedron for validation
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Get or build cached model, then lock mutex for entire solve call
-        let model_mutex = self.obtain_model(&polyhedron, use_presolve)?;
+        let model_mutex = self.obtain_model(&polyhedron, use_presolve, time_limit)?;
         let model = model_mutex.lock();
 
         let highs_ptr = model.highs_ptr;
@@ -372,6 +381,7 @@ mod tests {
             vec![obj1.clone()],
             SolverDirection::Maximize,
             true,
+            None,
         );
         assert!(result1.is_ok());
 
@@ -381,6 +391,7 @@ mod tests {
             vec![obj2],
             SolverDirection::Maximize,
             true,
+            None,
         );
         assert!(result2.is_ok());
 
@@ -390,6 +401,7 @@ mod tests {
             vec![obj1],
             SolverDirection::Maximize,
             true,
+            None,
         );
         assert!(result3.is_ok());
     }
@@ -403,7 +415,7 @@ mod tests {
         obj.insert("x".to_string(), 1.0);
         obj.insert("y".to_string(), 2.0);
 
-        let result = solver.solve(polyhedron, vec![obj], SolverDirection::Maximize, true);
+        let result = solver.solve(polyhedron, vec![obj], SolverDirection::Maximize, true, None);
         assert!(result.is_ok());
     }
 }

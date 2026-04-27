@@ -64,6 +64,7 @@ impl GurobiSolver {
     fn build_model(
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
         // Create Gurobi environment
         let mut env = Env::new("").map_err(|e| SolveInputError {
@@ -85,6 +86,13 @@ impl GurobiSolver {
             .map_err(|e| SolveInputError {
                 details: format!("Failed to set Gurobi presolve: {}", e),
             })?;
+
+        // Set time limit if specified (in seconds)
+        if let Some(limit) = time_limit {
+            env.set(param::TimeLimit, limit).map_err(|e| SolveInputError {
+                details: format!("Failed to set Gurobi time limit: {}", e),
+            })?;
+        }
 
         // Create a Gurobi model
         let mut model = Model::with_env("optimization", &env).map_err(|e| SolveInputError {
@@ -173,6 +181,7 @@ impl GurobiSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
         match &self.model_cache {
             Some(some_model_cache) => {
@@ -185,7 +194,7 @@ impl GurobiSolver {
                 }
 
                 // Not in cache, build new model
-                let model = Self::build_model(polyhedron, use_presolve)?;
+                let model = Self::build_model(polyhedron, use_presolve, time_limit)?;
 
                 // Store in cache
                 {
@@ -197,7 +206,7 @@ impl GurobiSolver {
             }
             None => {
                 // Cache disabled, always build new model
-                Self::build_model(polyhedron, use_presolve)
+                Self::build_model(polyhedron, use_presolve, time_limit)
             }
         }
     }
@@ -210,13 +219,14 @@ impl Solver for GurobiSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
+        time_limit: Option<f64>,
     ) -> std::result::Result<Vec<ApiSolution>, SolveInputError> {
         // Use GLPK polyhedron for validation
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
 
         // Get or build cached model
-        let cached_model = self.obtain_model(&polyhedron, use_presolve)?;
+        let cached_model = self.obtain_model(&polyhedron, use_presolve, time_limit)?;
         let mut model_lock = cached_model.lock();
 
         let sense = match direction {
