@@ -1,8 +1,18 @@
 mod convert;
 mod domain;
 mod models;
+mod memory_tracker;
 
 use models::SolveRequest;
+use memory_tracker::MemoryTracker;
+
+// Use jemalloc as the global allocator for memory profiling
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 use domain::solver::Solver;
 use domain::solver_factory::{create_solver_with_cache, SolverType};
@@ -23,6 +33,20 @@ use sentry_actix::Sentry;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
+// ---------- Helper functions ----------
+#[cfg(target_os = "macos")]
+fn parse_size_to_mb(size_str: &str) -> f64 {
+    if let Some(num_str) = size_str.strip_suffix('K') {
+        num_str.parse::<f64>().unwrap_or(0.0) / 1024.0
+    } else if let Some(num_str) = size_str.strip_suffix('M') {
+        num_str.parse::<f64>().unwrap_or(0.0)
+    } else if let Some(num_str) = size_str.strip_suffix('G') {
+        num_str.parse::<f64>().unwrap_or(0.0) * 1024.0
+    } else {
+        0.0
+    }
+}
+
 // ---------- Route handlers ----------
 /// POST /solve
 pub async fn solve(
@@ -30,6 +54,7 @@ pub async fn solve(
     solver: web::Data<Box<dyn Solver>>,
     use_presolve: web::Data<bool>,
     solver_semaphore: web::Data<Arc<tokio::sync::Semaphore>>,
+    memory_tracker: web::Data<MemoryTracker>,
 ) -> impl Responder {
     match validate_solve_request(&req) {
         Ok(_) => (),
@@ -55,11 +80,25 @@ pub async fn solve(
         objectives,
         direction,
     } = req.into_inner();
+
+    // Track input size
+    let input_size = std::mem::size_of_val(&polyhedron)
+        + std::mem::size_of_val(&objectives)
+        + polyhedron.a.rows.len() * std::mem::size_of::<i32>()
+        + polyhedron.a.cols.len() * std::mem::size_of::<i32>()
+        + polyhedron.a.vals.len() * std::mem::size_of::<i32>();
+    memory_tracker.track_allocation("solve_requests", input_size);
+
+    let tracker_clone = memory_tracker.get_ref().clone();
     let solve_task_result = tokio::task::spawn_blocking(move || {
         // Hold the permit for the duration of the blocking solver call by moving
         // it into the closure. It will be released automatically when dropped.
         let _permit = permit;
-        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref())
+        let result = solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref());
+
+        // Track deallocation after solve
+        tracker_clone.track_deallocation("solve_requests", input_size);
+        result
     })
     .await;
 
@@ -196,6 +235,215 @@ pub async fn root_redirect() -> impl Responder {
     HttpResponse::Found()
         .append_header(("Location", "/docs"))
         .finish()
+}
+
+/// GET /memory-profile - Generate memory profile dump
+pub async fn memory_profile(
+    _memory_tracker: web::Data<MemoryTracker>,
+    solver: web::Data<Box<dyn Solver>>,
+) -> impl Responder {
+    #[cfg(not(target_env = "msvc"))]
+    {
+        use tikv_jemalloc_ctl::{stats, epoch};
+
+        // Trigger jemalloc to update stats
+        if let Err(e) = epoch::mib().unwrap().advance() {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to update jemalloc stats: {}", e)
+            }));
+        }
+
+        // Get overall memory statistics
+        let allocated = stats::allocated::read().unwrap_or(0);
+        let resident = stats::resident::read().unwrap_or(0);
+        let metadata = stats::metadata::read().unwrap_or(0);
+        let active = stats::active::read().unwrap_or(0);
+
+        // Get process info
+        let pid = std::process::id();
+        let solver_name = solver.name();
+
+        // Get memory breakdown - platform specific
+        let type_breakdown: Vec<serde_json::Value> = {
+            #[cfg(target_os = "macos")]
+            {
+                use std::process::Command;
+
+                // Use vmmap without -summary to get detailed resident memory info
+                let output = Command::new("vmmap")
+                    .arg(pid.to_string())
+                    .output();
+
+                if let Ok(output) = output {
+                    if let Ok(stdout) = String::from_utf8(output.stdout) {
+                        let mut region_memory: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+                        // Parse vmmap output - format varies but typically has columns like:
+                        // TYPE                       VIRTUAL     RESIDENT    ...
+                        for line in stdout.lines() {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+
+                            // Skip header lines
+                            if line.contains("REGION TYPE") || line.contains("=====") || parts.is_empty() {
+                                continue;
+                            }
+
+                            // Look for lines with memory region info
+                            // Format: REGION_TYPE ... SIZE ... RESIDENT_SIZE
+                            if parts.len() >= 3 {
+                                // The first column is usually the region type
+                                let region_type = parts[0].to_string();
+
+                                // Find the resident column (usually has K/M/G suffix)
+                                for (i, part) in parts.iter().enumerate() {
+                                    if i > 0 && (part.ends_with('K') || part.ends_with('M') || part.ends_with('G')) {
+                                        // This might be resident size - try next column too
+                                        if let Some(next_part) = parts.get(i + 1) {
+                                            if next_part.ends_with('K') || next_part.ends_with('M') || next_part.ends_with('G') {
+                                                // Second size column is usually resident
+                                                let resident_mb = parse_size_to_mb(next_part);
+                                                let resident_bytes = (resident_mb * 1024.0 * 1024.0) as usize;
+                                                *region_memory.entry(region_type.clone()).or_insert(0) += resident_bytes;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Convert to sorted vec
+                        let mut mappings: Vec<_> = region_memory
+                            .into_iter()
+                            .map(|(region, bytes)| {
+                                serde_json::json!({
+                                    "region": region,
+                                    "resident_bytes": bytes,
+                                    "resident_mb": (bytes as f64) / (1024.0 * 1024.0)
+                                })
+                            })
+                            .filter(|m| m["resident_mb"].as_f64().unwrap_or(0.0) > 0.1)
+                            .collect();
+
+                        mappings.sort_by(|a, b| {
+                            let a_mb = a["resident_mb"].as_f64().unwrap_or(0.0);
+                            let b_mb = b["resident_mb"].as_f64().unwrap_or(0.0);
+                            b_mb.partial_cmp(&a_mb).unwrap()
+                        });
+
+                        mappings.truncate(20);
+                        mappings
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                use std::fs::File;
+                use std::io::{BufRead, BufReader};
+
+                // Parse /proc/self/smaps for detailed memory region info
+                if let Ok(file) = File::open("/proc/self/smaps") {
+                    let reader = BufReader::new(file);
+                    let mut region_memory: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    let mut current_region: Option<String> = None;
+
+                    for line in reader.lines().flatten() {
+                        // New memory mapping entry starts with an address range
+                        // Format: 7f1234567000-7f123456a000 r-xp 00000000 08:01 12345 /lib/x86_64-linux-gnu/libc.so.6
+                        if line.contains('-') && !line.starts_with(' ') {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 5 {
+                                // Extract region type from the pathname or permissions
+                                let region_name = if parts.len() > 5 {
+                                    // Has a pathname
+                                    let path = parts[5..].join(" ");
+                                    if path.starts_with('[') && path.ends_with(']') {
+                                        path.trim_matches(|c| c == '[' || c == ']').to_string()
+                                    } else if path.contains('/') {
+                                        // Extract filename from path
+                                        path.split('/').last().unwrap_or("anonymous").to_string()
+                                    } else {
+                                        path
+                                    }
+                                } else {
+                                    "anonymous".to_string()
+                                };
+                                current_region = Some(region_name);
+                            }
+                        } else if line.starts_with("Rss:") {
+                            // Rss: Resident Set Size (physical memory used)
+                            if let Some(ref region) = current_region {
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if parts.len() >= 2 {
+                                    if let Ok(kb) = parts[1].parse::<usize>() {
+                                        let bytes = kb * 1024;
+                                        *region_memory.entry(region.clone()).or_insert(0) += bytes;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Convert to sorted vec
+                    let mut mappings: Vec<_> = region_memory
+                        .into_iter()
+                        .map(|(region, bytes)| {
+                            serde_json::json!({
+                                "region": region,
+                                "resident_bytes": bytes,
+                                "resident_mb": (bytes as f64) / (1024.0 * 1024.0)
+                            })
+                        })
+                        .filter(|m| m["resident_mb"].as_f64().unwrap_or(0.0) > 0.1)
+                        .collect();
+
+                    mappings.sort_by(|a, b| {
+                        let a_mb = a["resident_mb"].as_f64().unwrap_or(0.0);
+                        let b_mb = b["resident_mb"].as_f64().unwrap_or(0.0);
+                        b_mb.partial_cmp(&a_mb).unwrap()
+                    });
+
+                    mappings.truncate(20);
+                    mappings
+                } else {
+                    Vec::new()
+                }
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                Vec::new()
+            }
+        };
+
+        HttpResponse::Ok().json(serde_json::json!({
+            "allocator": "jemalloc",
+            "process_id": pid,
+            "solver": solver_name,
+            "total_memory": {
+                "allocated_bytes": allocated,
+                "active_bytes": active,
+                "resident_bytes": resident,
+                "metadata_bytes": metadata,
+                "allocated_mb": (allocated as f64) / (1024.0 * 1024.0),
+                "resident_mb": (resident as f64) / (1024.0 * 1024.0)
+            },
+            "memory_mappings": type_breakdown,
+            "note": "Memory mappings show different regions of process memory (heap, stack, libraries, etc.)"
+        }))
+    }
+
+    #[cfg(target_env = "msvc")]
+    {
+        HttpResponse::Ok().json(serde_json::json!({
+            "error": "Memory profiling not available on MSVC (Windows). Use jemalloc on Unix systems."
+        }))
+    }
 }
 
 // Middleware
@@ -353,6 +601,7 @@ async fn main() -> std::io::Result<()> {
     // Clone solver and presolve flag for use in the closure
     let solver_data = web::Data::new(solver);
     let presolve_data = web::Data::new(use_presolve);
+    let memory_tracker_data = web::Data::new(MemoryTracker::new());
 
     // Configure maximum concurrent blocking solver threads via env var.
     // Default to 1 unless the user supplies a value. If the env var is set
@@ -374,6 +623,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Condition::new(sentry_enabled, Sentry::new()))
             .app_data(solver_data.clone())
             .app_data(presolve_data.clone())
+            .app_data(memory_tracker_data.clone())
             .app_data(web::Data::new(solver_semaphore.clone()))
             .app_data(
                 web::JsonConfig::default()
@@ -394,6 +644,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(root_redirect))
             .route("/health", web::get().to(health_check))
             .route("/docs", web::get().to(docs))
+            .route("/memory-profile", web::get().to(memory_profile))
             .service(
                 web::scope("")
                     .wrap(Condition::new(protect, from_fn(token_auth)))
