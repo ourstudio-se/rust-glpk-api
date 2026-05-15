@@ -56,7 +56,6 @@ impl Solver for GlpkSolver {
             &mut mut_polyhedron,
             borrowed_objectives,
             maximize,
-            _use_presolve,
             NO_TERMINAL_OUTPUT,
         );
 

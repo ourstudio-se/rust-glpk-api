@@ -916,9 +916,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "glpk-rust"
-version = "0.1.13"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd145f2020224b83aabe238b76bbc461e516fb38885a4686f171305a8e35f2fd"
+checksum = "9d19b180cb2348f0844ade18c0db7897f93bc20dfd0d16fb8b68ec61f38423d1"
 dependencies = [
  "cc",
  "cmake",
