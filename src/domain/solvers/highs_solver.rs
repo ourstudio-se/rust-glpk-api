@@ -270,7 +270,7 @@ impl Solver for HighsSolver {
             if status != 0 {
                 solutions.push(ApiSolution {
                     status: Status::Undefined,
-                    objective: 0,
+                    objective: 0.0,
                     solution: HashMap::new(),
                     error: Some(format!("HiGHS solve failed with status {}", status)),
                 });
@@ -311,7 +311,7 @@ impl Solver for HighsSolver {
 
             solutions.push(ApiSolution {
                 status: api_status,
-                objective: objective_value.round() as i32,
+                objective: objective_value,
                 solution: solution_map,
                 error: None,
             });
