@@ -63,7 +63,7 @@ impl From<Solution> for ApiSolution {
     fn from(s: Solution) -> Self {
         ApiSolution {
             status: s.status.into(),
-            objective: s.objective,
+            objective: s.objective as i32, // Match current api contract
             solution: s
                 .solution
                 .into_iter()
