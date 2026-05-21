@@ -6,6 +6,14 @@ pub struct SolveInputError {
     pub details: String,
 }
 
+impl From<glpk_rust::SolverError> for SolveInputError {
+    fn from(e: glpk_rust::SolverError) -> Self {
+        SolveInputError {
+            details: format!("GLPK solver error: {}", e),
+        }
+    }
+}
+
 pub fn validate_objectives_owned(
     variables: &Vec<Variable>,
     objectives: &[HashMap<String, f64>],

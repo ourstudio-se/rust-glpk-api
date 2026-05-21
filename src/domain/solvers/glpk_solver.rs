@@ -2,9 +2,8 @@ use crate::convert::{to_borrowed_objective, to_glpk_polyhedron};
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveInputError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron};
+use glpk_rust::solve_ilps;
 use std::collections::HashMap;
-
-use glpk_rust::{solve_ilps as glpk_solve_ilps, Solution};
 
 const NO_TERMINAL_OUTPUT: bool = false;
 
@@ -52,13 +51,13 @@ impl Solver for GlpkSolver {
         let mut mut_polyhedron = glpk_polyhedron;
 
         // Call the GLPK library solver
-        let lib_solutions: Vec<Solution> = glpk_solve_ilps(
+        let lib_solutions = solve_ilps(
             &mut mut_polyhedron,
             borrowed_objectives,
             maximize,
             _use_presolve,
             NO_TERMINAL_OUTPUT,
-        );
+        )?;
 
         // Convert GLPK solutions to API solutions
         let api_solutions: Vec<ApiSolution> = lib_solutions.into_iter().map(|s| s.into()).collect();
