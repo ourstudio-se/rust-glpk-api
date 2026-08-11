@@ -21,6 +21,7 @@ use std::env;
 
 use sentry_actix::Sentry;
 use std::sync::Arc;
+use std::time::Duration;
 use subtle::ConstantTimeEq;
 
 // ---------- Route handlers ----------
@@ -400,6 +401,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/solve", web::post().to(solve)),
             )
     })
+    .client_request_timeout(Duration::from_secs(10))
     .bind(("0.0.0.0", port))?
     .run()
     .await
