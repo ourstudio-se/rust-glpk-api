@@ -1,37 +1,21 @@
 # syntax=docker/dockerfile:1
 
-ARG RUST_VERSION=1.93.0
+ARG RUST_VERSION=1.98.1
 ARG APP_NAME=rust-solver-api
-ARG GLPK_VER=5.0
 
 ################################################################################
 # Create a stage for building the application.
 
-FROM rust:${RUST_VERSION}-alpine AS build
+FROM rust:${RUST_VERSION}-slim-bookworm AS build
 ARG APP_NAME
-ARG GLPK_VER
 WORKDIR /app
 
-RUN apk add --no-cache clang lld musl-dev git curl make pkgconf
-RUN apk add --no-cache glpk-dev gmp-dev
-
-# Create glpk.pc file manually because it's not included by default in alpine
-RUN mkdir -p /usr/local/lib/pkgconfig && \
-    cat > /usr/local/lib/pkgconfig/glpk.pc <<EOF
-prefix=/usr
-libdir=\${prefix}/lib
-includedir=\${prefix}/include
-
-Name: glpk
-Description: GNU Linear Programming Kit
-Version: ${GLPK_VER}
-Libs: -L\${libdir} -lglpk
-Libs.private: -lgmp
-Cflags: -I\${includedir}
-EOF
-
-# Add the custom glpk.pc file to the path
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libglpk-dev \
+    libgmp-dev \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
 
 # Viktigt för att kunna använda ${TARGETPLATFORM} i RUN
 ARG TARGETPLATFORM
@@ -50,7 +34,13 @@ RUN --mount=type=bind,source=src,target=src \
 # Create a new stage for running the application that contains the minimal
 # runtime dependencies for the application.
 
-FROM alpine:3.18 AS final
+FROM debian:bookworm-slim AS final
+
+RUN apt-get update && apt-get install -y \
+    libgcc-s1 \
+    libglpk40 \
+    libgmp10 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a non-privileged user that the app will run under.
 ARG UID=10001
