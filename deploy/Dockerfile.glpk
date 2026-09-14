@@ -37,6 +37,7 @@ RUN --mount=type=bind,source=src,target=src \
 FROM debian:bookworm-slim AS final
 
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     libgcc-s1 \
     libglpk40 \
     libgmp10 \
