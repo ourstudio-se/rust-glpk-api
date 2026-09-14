@@ -33,7 +33,7 @@ pub async fn solve(
 ) -> impl Responder {
     match validate_solve_request(&req) {
         Ok(_) => (),
-        Err(response) => return response,
+        Err(response) => return *response,
     }
 
     // Acquire an owned permit asynchronously before spawning the blocking task.
@@ -93,25 +93,31 @@ pub async fn solve(
     }
 }
 
-fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
+fn unprocessable_response(error: String) -> Box<HttpResponse> {
+    Box::new(HttpResponse::UnprocessableEntity().json(serde_json::json!({ "error": error })))
+}
+
+fn validate_solve_request(req: &SolveRequest) -> Result<(), Box<HttpResponse>> {
     let variable_count = req.polyhedron.variables.len();
     let column_count = req.polyhedron.a.shape.ncols;
     if variable_count != column_count {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Number of variables must match number of columns in A got {} variables and {} columns", variable_count, column_count)
-            }),
-        ));
+        let message = format!(
+            "Number of variables must match number of columns in A got {} variables and {} columns",
+            variable_count, column_count
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     let b_count = req.polyhedron.b.len();
     let row_count = req.polyhedron.a.shape.nrows;
     if b_count != row_count {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Number of values in b must match number of rows in A got {} values and {} rows", b_count, row_count)
-            }),
-        ));
+        let message = format!(
+            "Number of values in b must match number of rows in A got {} values and {} rows",
+            b_count, row_count
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     // Validate sparse matrix arrays have same length
@@ -119,11 +125,12 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     let cols_len = req.polyhedron.a.cols.len();
     let vals_len = req.polyhedron.a.vals.len();
     if rows_len != cols_len || rows_len != vals_len {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Sparse matrix arrays must have same length: got rows={}, cols={}, vals={}", rows_len, cols_len, vals_len)
-            }),
-        ));
+        let message = format!(
+            "Sparse matrix arrays must have same length: got rows={}, cols={}, vals={}",
+            rows_len, cols_len, vals_len
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     // Validate sparse matrix indices are within bounds
@@ -132,19 +139,21 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
         let col = req.polyhedron.a.cols[i];
 
         if row < 0 || row >= row_count as i32 {
-            return Err(HttpResponse::UnprocessableEntity().json(
-                serde_json::json!({
-                    "error": format!("Row index {} at position {} is out of bounds [0, {})", row, i, row_count)
-                }),
-            ));
+            let message = format!(
+                "Row index {} at position {} is out of bounds [0, {})",
+                row, i, row_count
+            );
+            let response = unprocessable_response(message);
+            return Err(response);
         }
 
         if col < 0 || col >= column_count as i32 {
-            return Err(HttpResponse::UnprocessableEntity().json(
-                serde_json::json!({
-                    "error": format!("Column index {} at position {} is out of bounds [0, {})", col, i, column_count)
-                }),
-            ));
+            let message = format!(
+                "Column index {} at position {} is out of bounds [0, {})",
+                col, i, column_count
+            );
+            let response = unprocessable_response(message);
+            return Err(response);
         }
     }
 
@@ -154,27 +163,30 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), HttpResponse> {
     const MAX_NONZEROS: usize = 1_000_000;
 
     if variable_count > MAX_VARIABLES {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Too many variables: {} exceeds limit of {}", variable_count, MAX_VARIABLES)
-            }),
-        ));
+        let message = format!(
+            "Too many variables: {} exceeds limit of {}",
+            variable_count, MAX_VARIABLES
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     if row_count > MAX_CONSTRAINTS {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Too many constraints: {} exceeds limit of {}", row_count, MAX_CONSTRAINTS)
-            }),
-        ));
+        let message = format!(
+            "Too many constraints: {} exceeds limit of {}",
+            row_count, MAX_CONSTRAINTS
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     if rows_len > MAX_NONZEROS {
-        return Err(HttpResponse::UnprocessableEntity().json(
-            serde_json::json!({
-                "error": format!("Too many non-zero elements: {} exceeds limit of {}", rows_len, MAX_NONZEROS)
-            }),
-        ));
+        let message = format!(
+            "Too many non-zero elements: {} exceeds limit of {}",
+            rows_len, MAX_NONZEROS
+        );
+        let response = unprocessable_response(message);
+        return Err(response);
     }
 
     Ok(())
