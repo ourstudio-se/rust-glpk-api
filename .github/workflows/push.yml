@@ -47,6 +47,9 @@ jobs:
 
       - name: Audit Rust Dependencies
         uses: actions-rust-lang/audit@v1
+        with:
+          # h2 0.3.27 via actix-http; no 0.3 patch (RUSTSEC-2026-0258 is 0.4.16+ only)
+          ignore: RUSTSEC-2026-0258
 
   scan:
     name: Scan Docker image

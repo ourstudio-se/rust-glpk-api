@@ -261,12 +261,12 @@ fn init_sentry() -> sentry::ClientInitGuard {
 
     println!("Initializing Sentry with environment: {}", environment);
 
-    sentry::init((
-        dsn,
-        sentry::ClientOptions {
-            environment: Some(environment.into()),
-            attach_stacktrace: true,
-            before_send: Some(Arc::new(move |mut event| {
+    sentry::init(
+        sentry::ClientOptions::new()
+            .dsn(&dsn)
+            .environment(environment)
+            .attach_stacktrace(true)
+            .before_send(move |mut event| {
                 event.tags.insert("service".into(), service_name.clone());
 
                 // Add caas tag if configured
@@ -275,10 +275,8 @@ fn init_sentry() -> sentry::ClientInitGuard {
                 }
 
                 Some(event)
-            })),
-            ..Default::default()
-        },
-    ))
+            }),
+    )
 }
 
 // ---------- Server bootstrap ----------
