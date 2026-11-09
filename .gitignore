@@ -3,3 +3,6 @@
 .env
 clients/Rust/.env
 clients/Rust/target
+
+# Local audit ignores
+/.cargo/audit.toml
