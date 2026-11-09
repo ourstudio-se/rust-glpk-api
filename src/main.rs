@@ -97,9 +97,8 @@ fn create_solve_error_response(error: SolveError) -> HttpResponse {
         SolveErrorType::TimeLimitExceeded => {
             HttpResponse::GatewayTimeout().json(serde_json::json!({ "error": "solver timed out" }))
         }
-        SolveErrorType::Unknown => {
-            HttpResponse::InternalServerError().json(serde_json::json!({ "error": "something went wrong" }))
-        }
+        SolveErrorType::Unknown => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": "something went wrong" })),
     }
 }
 

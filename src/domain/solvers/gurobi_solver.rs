@@ -71,23 +71,20 @@ impl GurobiSolver {
         })?;
 
         // Disable Gurobi console output
-        env.set(param::OutputFlag, 0).map_err(|e| {
-            SolveError::input(format!("Failed to set Gurobi output flag: {}", e))
-        })?;
+        env.set(param::OutputFlag, 0)
+            .map_err(|e| SolveError::input(format!("Failed to set Gurobi output flag: {}", e)))?;
 
         // Use all available threads
-        env.set(param::Threads, 0).map_err(|e| {
-            SolveError::input(format!("Failed to set Gurobi thread count: {}", e))
-        })?;
+        env.set(param::Threads, 0)
+            .map_err(|e| SolveError::input(format!("Failed to set Gurobi thread count: {}", e)))?;
 
         // Configure presolve: -1 = auto, 0 = off, 1 = conservative, 2 = aggressive
         env.set(param::Presolve, if use_presolve { -1 } else { 0 })
             .map_err(|e| SolveError::input(format!("Failed to set Gurobi presolve: {}", e)))?;
 
         // Create a Gurobi model
-        let mut model = Model::with_env("optimization", &env).map_err(|e| {
-            SolveError::input(format!("Failed to create Gurobi model: {}", e))
-        })?;
+        let mut model = Model::with_env("optimization", &env)
+            .map_err(|e| SolveError::input(format!("Failed to create Gurobi model: {}", e)))?;
 
         // Add variables
         let mut vars: Vec<Var> = Vec::new();
@@ -114,7 +111,10 @@ impl GurobiSolver {
         }
 
         model.update().map_err(|e| {
-            SolveError::input(format!("Failed to update model after adding variables: {}", e))
+            SolveError::input(format!(
+                "Failed to update model after adding variables: {}",
+                e
+            ))
         })?;
 
         // Build sparse matrix structure
