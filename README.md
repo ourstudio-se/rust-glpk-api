@@ -206,8 +206,7 @@ Control runtime behavior with environment variables. Relevant settings:
 - `MAX_BLOCKING_THREADS` — Limits the number of concurrent CPU-bound solver tasks executed via `spawn_blocking`.
   - Default: `1` (single concurrent blocking solver task).
 - `MAX_GLPK_SOLVE_MS` — Optional total GLPK wall time per `/solve` in milliseconds (all objectives in one request).
-  - Default: **unlimited** (unset or `0`).
-  - Set a positive value in production (e.g. `10000`) so a stuck MIP cannot go on indefinitely.
+  - Default: **unlimited** (unset or `0`)
 
 Example:
 
@@ -345,7 +344,7 @@ This standard formulation allows you to express a wide variety of optimization p
 - `SOLVER` - Solver backend: `glpk` (default), `highs`, `gurobi`
 - `GUROBI_HOME` - Path to Gurobi installation (required for Gurobi solver)
 - `USE_PRESOLVE` - Enable/disable presolve optimization: `true` (default) or `false`
-- `MAX_BLOCKING_THREADS` - Concurrent blocking solver tasks (default: `1`; keep `1` in production)
+- `MAX_BLOCKING_THREADS` - Concurrent blocking solver tasks (default: `1`)
 - `MAX_GLPK_SOLVE_MS` - Total GLPK wall time per `/solve` in milliseconds. Default unlimited (unset or `0`).
 
 ### Using .env file

@@ -28,7 +28,7 @@ impl SolveError {
         }
     }
 
-    pub fn unknown() -> Self {
+    pub fn unknown(details: impl Into<String>) -> Self {
         Self {
             error_type: SolveErrorType::Unknown,
             details: details.into(),

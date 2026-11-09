@@ -90,17 +90,15 @@ fn create_solve_error_response(error: SolveError) -> HttpResponse {
         sentry::Level::Error,
     );
 
-    payload = serde_json::json!({ "error": error.details });
-
     match error.error_type {
         SolveErrorType::InputError => {
-            HttpResponse::UnprocessableEntity().json(payload)
+            HttpResponse::UnprocessableEntity().json(serde_json::json!({ "error": error.details }))
         }
         SolveErrorType::TimeLimitExceeded => {
-            HttpResponse::GatewayTimeout().json(payload)
+            HttpResponse::GatewayTimeout().json(serde_json::json!({ "error": "solver timed out" }))
         }
         SolveErrorType::Unknown => {
-            HttpResponse::InternalServerError().json(serde_json::json!({ "error": "Something went wrong..." }))
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": "something went wrong" }))
         }
     }
 }
@@ -537,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn create_solve_error_response_given_input_error_should_return_422() {
+    fn create_solve_error_response_given_unknwon_error_should_return_500() {
         let resp = create_solve_error_response(SolveError {
             error_type: SolveErrorType::Unknown,
             details: fake_string(),
