@@ -860,7 +860,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1048,9 +1048,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "glpk-rust"
-version = "0.2.1"
+version = "0.3.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf656a842c287e036a5c0552c5b0d3b806c3a95a9041bc78a49d726de176edef"
+checksum = "1e9a16ed8fb554df817f2e5c5d22d1c1cfba815c0077f1914aa6d618808a7a27"
 dependencies = [
  "cc",
  "cmake",
@@ -2113,7 +2113,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2350,6 +2350,7 @@ dependencies = [
  "highs-sys",
  "lru",
  "parking_lot",
+ "rand 0.9.4",
  "reqwest 0.12.28",
  "rustls-webpki",
  "sentry",
@@ -2392,7 +2393,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2451,7 +2452,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3378,7 +3379,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

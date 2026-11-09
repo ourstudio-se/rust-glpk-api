@@ -1,6 +1,6 @@
 use crate::convert::to_glpk_polyhedron;
 use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveInputError};
+use crate::domain::validate::{validate_objectives_owned, SolveError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,31 +64,29 @@ impl GurobiSolver {
     fn build_model(
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
+    ) -> Result<Arc<Mutex<GurobiModel>>, SolveError> {
         // Create Gurobi environment
-        let mut env = Env::new("").map_err(|e| SolveInputError {
-            details: format!("Failed to create Gurobi environment: {}", e),
+        let mut env = Env::new("").map_err(|e| {
+            SolveError::input(format!("Failed to create Gurobi environment: {}", e))
         })?;
 
         // Disable Gurobi console output
-        env.set(param::OutputFlag, 0).map_err(|e| SolveInputError {
-            details: format!("Failed to set Gurobi output flag: {}", e),
+        env.set(param::OutputFlag, 0).map_err(|e| {
+            SolveError::input(format!("Failed to set Gurobi output flag: {}", e))
         })?;
 
         // Use all available threads
-        env.set(param::Threads, 0).map_err(|e| SolveInputError {
-            details: format!("Failed to set Gurobi thread count: {}", e),
+        env.set(param::Threads, 0).map_err(|e| {
+            SolveError::input(format!("Failed to set Gurobi thread count: {}", e))
         })?;
 
         // Configure presolve: -1 = auto, 0 = off, 1 = conservative, 2 = aggressive
         env.set(param::Presolve, if use_presolve { -1 } else { 0 })
-            .map_err(|e| SolveInputError {
-                details: format!("Failed to set Gurobi presolve: {}", e),
-            })?;
+            .map_err(|e| SolveError::input(format!("Failed to set Gurobi presolve: {}", e)))?;
 
         // Create a Gurobi model
-        let mut model = Model::with_env("optimization", &env).map_err(|e| SolveInputError {
-            details: format!("Failed to create Gurobi model: {}", e),
+        let mut model = Model::with_env("optimization", &env).map_err(|e| {
+            SolveError::input(format!("Failed to create Gurobi model: {}", e))
         })?;
 
         // Add variables
@@ -102,25 +100,21 @@ impl GurobiSolver {
                     model,
                     name: &var.id
                 )
-                .map_err(|e| SolveInputError {
-                    details: format!("Failed to add binary variable: {}", e),
-                })?
+                .map_err(|e| SolveError::input(format!("Failed to add binary variable: {}", e)))?
             } else {
                 add_intvar!(
                     model,
                     name: &var.id,
                     bounds: lower as f64..upper as f64
                 )
-                .map_err(|e| SolveInputError {
-                    details: format!("Failed to add integer variable: {}", e),
-                })?
+                .map_err(|e| SolveError::input(format!("Failed to add integer variable: {}", e)))?
             };
 
             vars.push(gurobi_var);
         }
 
-        model.update().map_err(|e| SolveInputError {
-            details: format!("Failed to update model after adding variables: {}", e),
+        model.update().map_err(|e| {
+            SolveError::input(format!("Failed to update model after adding variables: {}", e))
         })?;
 
         // Build sparse matrix structure
@@ -156,13 +150,14 @@ impl GurobiSolver {
             let constraint_name = format!("c{}", row_idx);
             model
                 .add_constr(&constraint_name, c!(expr <= rhs))
-                .map_err(|e| SolveInputError {
-                    details: format!("Failed to add constraint: {}", e),
-                })?;
+                .map_err(|e| SolveError::input(format!("Failed to add constraint: {}", e)))?;
         }
 
-        model.update().map_err(|e| SolveInputError {
-            details: format!("Failed to update model after adding constraints: {}", e),
+        model.update().map_err(|e| {
+            SolveError::input(format!(
+                "Failed to update model after adding constraints: {}",
+                e
+            ))
         })?;
 
         Ok(Arc::new(Mutex::new(GurobiModel { model, vars })))
@@ -173,7 +168,7 @@ impl GurobiSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<GurobiModel>>, SolveInputError> {
+    ) -> Result<Arc<Mutex<GurobiModel>>, SolveError> {
         match &self.model_cache {
             Some(some_model_cache) => {
                 // Check cache first
@@ -210,7 +205,7 @@ impl Solver for GurobiSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> std::result::Result<Vec<ApiSolution>, SolveInputError> {
+    ) -> std::result::Result<Vec<ApiSolution>, SolveError> {
         // Use GLPK polyhedron for validation
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
@@ -244,19 +239,19 @@ impl Solver for GurobiSolver {
             model_lock
                 .model
                 .set_objective(obj_expr, sense)
-                .map_err(|e| SolveInputError {
-                    details: format!("Failed to set objective: {}", e),
-                })?;
+                .map_err(|e| SolveError::input(format!("Failed to set objective: {}", e)))?;
 
             // Optimize
-            model_lock.model.optimize().map_err(|e| SolveInputError {
-                details: format!("Failed to optimize: {}", e),
-            })?;
+            model_lock
+                .model
+                .optimize()
+                .map_err(|e| SolveError::input(format!("Failed to optimize: {}", e)))?;
 
             // Extract solution
-            let model_status = model_lock.model.status().map_err(|e| SolveInputError {
-                details: format!("Failed to get model status: {}", e),
-            })?;
+            let model_status = model_lock
+                .model
+                .status()
+                .map_err(|e| SolveError::input(format!("Failed to get model status: {}", e)))?;
             let status = Self::convert_status(model_status);
 
             // Map solution back to variable names

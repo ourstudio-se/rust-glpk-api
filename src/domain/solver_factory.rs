@@ -39,11 +39,12 @@ impl SolverType {
 pub fn create_solver_with_cache(
     solver_type: SolverType,
     cache_size: Option<usize>,
+    glpk_timeout_ms: Option<u32>,
 ) -> Box<dyn Solver> {
     match solver_type {
         SolverType::Glpk => match cache_size {
-            Some(size) => Box::new(GlpkSolver::with_cache_size(Some(size))),
-            None => Box::new(GlpkSolver::without_cache()),
+            Some(size) => Box::new(GlpkSolver::with_cache_size(Some(size), glpk_timeout_ms)),
+            None => Box::new(GlpkSolver::without_cache(glpk_timeout_ms)),
         },
         #[cfg(feature = "highs-solver")]
         SolverType::Highs => match cache_size {
@@ -63,7 +64,7 @@ mod tests {
     use super::*;
 
     pub fn create_solver(solver_type: SolverType) -> Box<dyn Solver> {
-        create_solver_with_cache(solver_type, None) // Default to no cache
+        create_solver_with_cache(solver_type, None, None) // Default to no cache, unlimited GLPK time
     }
 
     #[test]
