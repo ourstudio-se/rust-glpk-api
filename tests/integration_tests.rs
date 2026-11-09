@@ -4,6 +4,7 @@ use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
+use std::collections::HashMap;
 
 static PORT_COUNTER: AtomicU16 = AtomicU16::new(9010);
 
@@ -13,14 +14,21 @@ struct TestServer {
 }
 
 impl TestServer {
-    fn start() -> Self {
+    fn start(env_vars: Option<HashMap<String, String>>) -> Self {
         // Get a unique port for this test
         let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-        let child = Command::new("cargo")
-            .args(&["run"])
-            .env("PORT", port.to_string())
-            .spawn()
+        let mut cmd = Command::new("cargo");
+        cmd.args(&["run"]);
+        cmd.env("PORT", port.to_string());
+
+        if let Some(env_vars) = env_vars {
+            for (key, value) in env_vars {
+                cmd.env(key, value);
+            }
+        }
+
+        let child = cmd.spawn()
             .expect("Failed to start test server");
 
         // Wait longer for server to start
@@ -77,7 +85,7 @@ impl Drop for TestServer {
 #[tokio::test]
 #[serial]
 async fn test_health_endpoint() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let response = client
@@ -94,7 +102,7 @@ async fn test_health_endpoint() {
 #[tokio::test]
 #[serial]
 async fn test_solve_valid_request() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let request_body = json!({
@@ -140,7 +148,7 @@ async fn test_solve_valid_request() {
 #[tokio::test]
 #[serial]
 async fn test_solve_invalid_json() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let response = client
@@ -164,7 +172,7 @@ async fn test_solve_invalid_json() {
 #[tokio::test]
 #[serial]
 async fn test_solve_minimize_direction() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let request_body = json!({
@@ -207,7 +215,7 @@ async fn test_solve_minimize_direction() {
 #[tokio::test]
 #[serial]
 async fn test_nonexistent_endpoint() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let response = client
@@ -222,7 +230,7 @@ async fn test_nonexistent_endpoint() {
 #[tokio::test]
 #[serial]
 async fn test_docs_endpoint() {
-    let _server = TestServer::start();
+    let _server = TestServer::start(None);
     let client = reqwest::Client::new();
 
     let response = client
@@ -238,79 +246,17 @@ async fn test_docs_endpoint() {
     assert!(body.contains("<!DOCTYPE html"));
 }
 
-struct TestServerWithAuth {
-    child: Option<Child>,
-    port: u16,
-}
-
-impl TestServerWithAuth {
-    fn start() -> Self {
-        // Get a unique port for this test
-        let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-
-        let child = Command::new("cargo")
-            .args(&["run"])
-            .env("PORT", port.to_string())
-            .env("PROTECT", "true")
-            .env("API_TOKEN", "secret")
-            .spawn()
-            .expect("Failed to start test server");
-
-        // Wait longer for server to start
-        thread::sleep(Duration::from_secs(5));
-
-        // Test if server is responding with better error handling
-        let mut server_ready = false;
-        for attempt in 0..15 {
-            if let Ok(output) = std::process::Command::new("curl")
-                .args(&[
-                    "-s",
-                    "-o",
-                    "/dev/null",
-                    "-w",
-                    "%{http_code}",
-                    &format!("http://127.0.0.1:{}/health", port),
-                ])
-                .output()
-            {
-                let status_code = String::from_utf8_lossy(&output.stdout);
-                if status_code.trim() == "200" {
-                    server_ready = true;
-                    break;
-                }
-            }
-            println!("Attempt {}: Server not ready yet, waiting...", attempt + 1);
-            thread::sleep(Duration::from_millis(1000));
-        }
-
-        if !server_ready {
-            panic!("Server failed to start on port {} after 15 seconds", port);
-        }
-
-        TestServerWithAuth {
-            child: Some(child),
-            port,
-        }
-    }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
-}
-
-impl Drop for TestServerWithAuth {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
+fn start_test_server_with_auth() -> TestServer {
+    TestServer::start(Some(HashMap::from([
+        ("PROTECT".to_string(), "true".to_string()),
+        ("API_TOKEN".to_string(), "secret".to_string()),
+    ])))
 }
 
 #[tokio::test]
 #[serial]
 async fn test_empty_endpoint_should_bypass_auth() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -329,7 +275,7 @@ async fn test_empty_endpoint_should_bypass_auth() {
 #[tokio::test]
 #[serial]
 async fn test_health_endpoint_should_bypass_auth() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -346,7 +292,7 @@ async fn test_health_endpoint_should_bypass_auth() {
 #[tokio::test]
 #[serial]
 async fn test_docs_endpoint_should_bypass_auth() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -365,7 +311,7 @@ async fn test_docs_endpoint_should_bypass_auth() {
 #[tokio::test]
 #[serial]
 async fn test_solve_valid_token() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -382,7 +328,7 @@ async fn test_solve_valid_token() {
 #[tokio::test]
 #[serial]
 async fn test_solve_invalid_token() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -406,7 +352,7 @@ async fn test_solve_invalid_token() {
 #[tokio::test]
 #[serial]
 async fn test_solve_no_token_header() {
-    let _server = TestServerWithAuth::start();
+    let _server = start_test_server_with_auth();
     let client = reqwest::Client::new();
 
     let response = client
@@ -424,4 +370,49 @@ async fn test_solve_no_token_header() {
         .expect("Failed to parse JSON response");
 
     assert_eq!(body["error"], "Unauthorized");
+}
+
+fn start_test_server_with_solve_time_limit() -> TestServer {
+    TestServer::start(
+        Some(HashMap::from([
+            ("MAX_GLPK_SOLVE_MS".to_string(), "2".to_string()),
+        ]))
+    )
+}
+
+#[tokio::test]
+#[serial]
+async fn test_solve_max_glpk_solve_ms() {
+    let _server = start_test_server_with_solve_time_limit();
+    let client = reqwest::Client::new();
+
+    let request_body = json!({
+        "polyhedron": {
+            "A": {
+                "rows": [0, 0, 1, 1, 2, 2],
+                "cols": [0, 1, 0, 2, 1, 2],
+                "vals": [1, 1, 1, 1, 1, 1],
+                "shape": {"nrows": 3, "ncols": 3}
+            },
+            "b": [1, 1, 1],
+            "variables": [
+                {"id": "x1", "bound": [0, 1]},
+                {"id": "x2", "bound": [0, 1]},
+                {"id": "x3", "bound": [0, 1]}
+            ]
+        },
+        "objectives": [
+            {"x1": 0, "x2": 0, "x3": 1}
+        ],
+        "direction": "maximize"
+    });
+
+    let response = client
+        .post(&format!("{}/solve", _server.base_url()))
+        .json(&request_body)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 504);
 }
