@@ -1,10 +1,10 @@
 use serde_json::json;
 use serial_test::serial;
+use std::collections::HashMap;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
-use std::collections::HashMap;
 
 static PORT_COUNTER: AtomicU16 = AtomicU16::new(9010);
 
@@ -28,8 +28,7 @@ impl TestServer {
             }
         }
 
-        let child = cmd.spawn()
-            .expect("Failed to start test server");
+        let child = cmd.spawn().expect("Failed to start test server");
 
         // Wait longer for server to start
         thread::sleep(Duration::from_secs(10));
@@ -373,11 +372,10 @@ async fn test_solve_no_token_header() {
 }
 
 fn start_test_server_with_solve_time_limit() -> TestServer {
-    TestServer::start(
-        Some(HashMap::from([
-            ("MAX_GLPK_SOLVE_MS".to_string(), "2".to_string()),
-        ]))
-    )
+    TestServer::start(Some(HashMap::from([(
+        "MAX_GLPK_SOLVE_MS".to_string(),
+        "2".to_string(),
+    )])))
 }
 
 #[tokio::test]
