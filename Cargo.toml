@@ -1,6 +1,6 @@
 [package]
 name = "rust-solver-api"
-version = "0.1.14"
+version = "0.1.14-beta.1"
 edition = "2021"
 
 [features]
