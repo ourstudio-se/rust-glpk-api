@@ -4,7 +4,7 @@ mod models;
 
 use models::SolveRequest;
 
-use domain::solver::Solver;
+use domain::solver::{SolveError, SolveErrorType, Solver};
 use domain::solver_factory::{create_solver_with_cache, SolverType};
 
 use actix_web::body::BoxBody;
@@ -80,16 +80,25 @@ pub async fn solve(
         Ok(api_solutions) => {
             HttpResponse::Ok().json(serde_json::json!({ "solutions": api_solutions }))
         }
-        Err(error) => {
-            // Capture error with breadcrumb context
-            sentry::capture_message(
-                &format!("Solve failed: {}", error.details),
-                sentry::Level::Error,
-            );
-            HttpResponse::UnprocessableEntity().json(serde_json::json!({
-                "error": error.details,
-            }))
+        Err(error) => create_solve_error_response(error),
+    }
+}
+
+fn create_solve_error_response(error: SolveError) -> HttpResponse {
+    sentry::capture_message(
+        &format!("Solve failed: {}", error.details),
+        sentry::Level::Error,
+    );
+
+    match error.error_type {
+        SolveErrorType::InputError => {
+            HttpResponse::UnprocessableEntity().json(serde_json::json!({ "error": error.details }))
         }
+        SolveErrorType::TimeLimitExceeded => {
+            HttpResponse::GatewayTimeout().json(serde_json::json!({ "error": "solver timed out" }))
+        }
+        SolveErrorType::Unknown => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": "something went wrong" })),
     }
 }
 
@@ -343,7 +352,23 @@ async fn main() -> std::io::Result<()> {
         .ok()
         .and_then(|s| s.parse::<usize>().ok());
 
-    let solver = create_solver_with_cache(solver_type, cache_size);
+    // Optional total GLPK wall-time budget per /solve (milliseconds).
+    //  (default: disabled, set to enable)
+    let glpk_time_limit = match env::var("MAX_GLPK_SOLVE_MS") {
+        Err(_) => None,
+        Ok(s) => {
+            let n: u32 = s
+                .parse()
+                .expect("MAX_GLPK_SOLVE_MS must be a non-negative integer");
+            if n == 0 {
+                None
+            } else {
+                Some(n)
+            }
+        }
+    };
+
+    let solver = create_solver_with_cache(solver_type, cache_size, glpk_time_limit);
 
     println!(
         "Server is {}",
@@ -357,6 +382,10 @@ async fn main() -> std::io::Result<()> {
     match cache_size {
         Some(cs) => println!("LRU Model builder cache: {} entries", cs),
         None => println!("LRU Model builder cache: disabled"),
+    }
+    match glpk_time_limit {
+        Some(ms) => println!("GLPK solve timeout: {} ms", ms),
+        None => println!("GLPK solve timeout: unlimited"),
     }
     println!("Starting server on http://127.0.0.1:{}", port);
 
@@ -425,6 +454,10 @@ mod tests {
         ApiIntegerSparseMatrix, ApiShape, ApiVariable, SolverDirection, SparseLEIntegerPolyhedron,
     };
 
+    fn fake_string() -> String {
+        rand::random::<u64>().to_string()
+    }
+
     fn make_valid_request() -> SolveRequest {
         SolveRequest {
             polyhedron: SparseLEIntegerPolyhedron {
@@ -480,5 +513,32 @@ mod tests {
         req.polyhedron.b.pop();
         let resp = validate_solve_request(&req).unwrap_err();
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn create_solve_error_response_given_time_limit_exceeded_should_return_504() {
+        let resp = create_solve_error_response(SolveError {
+            error_type: SolveErrorType::TimeLimitExceeded,
+            details: fake_string(),
+        });
+        assert_eq!(resp.status(), StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[test]
+    fn create_solve_error_response_given_input_error_should_return_422() {
+        let resp = create_solve_error_response(SolveError {
+            error_type: SolveErrorType::InputError,
+            details: fake_string(),
+        });
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn create_solve_error_response_given_unknwon_error_should_return_500() {
+        let resp = create_solve_error_response(SolveError {
+            error_type: SolveErrorType::Unknown,
+            details: fake_string(),
+        });
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

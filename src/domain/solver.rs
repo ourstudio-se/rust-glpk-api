@@ -1,6 +1,7 @@
-use crate::domain::validate::SolveInputError;
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron};
 use std::collections::HashMap;
+
+pub use crate::domain::validate::{SolveError, SolveErrorType};
 
 /// Common interface for LP/ILP solvers
 pub trait Solver: Send + Sync {
@@ -20,7 +21,7 @@ pub trait Solver: Send + Sync {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveInputError>;
+    ) -> Result<Vec<ApiSolution>, SolveError>;
 
     /// Get the solver name for logging/debugging
     fn name(&self) -> &str;

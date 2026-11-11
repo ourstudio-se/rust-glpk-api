@@ -1,6 +1,6 @@
 use crate::convert::{to_borrowed_objective, to_glpk_polyhedron};
 use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveInputError};
+use crate::domain::validate::{validate_objectives_owned, SolveError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron};
 use glpk_rust::solve_ilps;
 use std::collections::HashMap;
@@ -11,18 +11,20 @@ const NO_TERMINAL_OUTPUT: bool = false;
 ///
 /// Note: GLPK does not support model caching due to its mutable API design.
 /// The cache_size parameter is accepted for API consistency but has no effect.
-pub struct GlpkSolver;
+pub struct GlpkSolver {
+    timeout_ms: Option<u32>,
+}
 
 impl GlpkSolver {
     /// Create a new GLPK solver with specified cache size
     /// Note: Cache is not supported for GLPK, parameter ignored
-    pub fn with_cache_size(_size: Option<usize>) -> Self {
-        GlpkSolver
+    pub fn with_cache_size(_size: Option<usize>, timeout_ms: Option<u32>) -> Self {
+        GlpkSolver { timeout_ms }
     }
 
     /// Create solver with caching disabled (same as default for GLPK)
-    pub fn without_cache() -> Self {
-        GlpkSolver
+    pub fn without_cache(timeout_ms: Option<u32>) -> Self {
+        GlpkSolver { timeout_ms }
     }
 }
 
@@ -33,7 +35,7 @@ impl Solver for GlpkSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         _use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveInputError> {
+    ) -> Result<Vec<ApiSolution>, SolveError> {
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
 
         // Validate objectives against variables
@@ -57,6 +59,7 @@ impl Solver for GlpkSolver {
             maximize,
             _use_presolve,
             NO_TERMINAL_OUTPUT,
+            self.timeout_ms,
         )?;
 
         // Convert GLPK solutions to API solutions

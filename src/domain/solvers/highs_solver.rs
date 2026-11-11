@@ -1,6 +1,6 @@
 use crate::convert::to_glpk_polyhedron;
 use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveInputError};
+use crate::domain::validate::{validate_objectives_owned, SolveError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -88,16 +88,14 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
+    ) -> Result<Arc<Mutex<HighsModel>>, SolveError> {
         let n_rows = polyhedron.a.shape.nrows as i32;
         let n_cols = polyhedron.variables.len() as i32;
 
         // Create HiGHS instance
         let highs_ptr = unsafe { Highs_create() };
         if highs_ptr.is_null() {
-            return Err(SolveInputError {
-                details: "Failed to create HiGHS instance".to_string(),
-            });
+            return Err(SolveError::input("Failed to create HiGHS instance"));
         }
 
         // Set options
@@ -195,7 +193,7 @@ impl HighsSolver {
         &self,
         polyhedron: &SparseLEIntegerPolyhedron,
         use_presolve: bool,
-    ) -> Result<Arc<Mutex<HighsModel>>, SolveInputError> {
+    ) -> Result<Arc<Mutex<HighsModel>>, SolveError> {
         match &self.model_cache {
             Some(some_model_cache) => {
                 // Check cache first
@@ -232,7 +230,7 @@ impl Solver for HighsSolver {
         objectives: Vec<HashMap<String, f64>>,
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveInputError> {
+    ) -> Result<Vec<ApiSolution>, SolveError> {
         // Use GLPK polyhedron for validation
         let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
         validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
