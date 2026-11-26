@@ -1,4 +1,5 @@
 use crate::convert::to_glpk_polyhedron;
+use crate::domain::solve_outcome::{self, Outcome};
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
@@ -64,23 +65,6 @@ impl HighsSolver {
     /// Create solver with caching disabled
     pub fn without_cache() -> Self {
         HighsSolver { model_cache: None }
-    }
-
-    /// Convert HiGHS status to our API status
-    fn convert_status(status: i32) -> Status {
-        const HIGHS_MODEL_STATUS_OPTIMAL: i32 = 7;
-        const HIGHS_MODEL_STATUS_INFEASIBLE: i32 = 8;
-        const HIGHS_MODEL_STATUS_UNBOUNDED: i32 = 10;
-        const HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE: i32 = 9;
-
-        match status {
-            HIGHS_MODEL_STATUS_OPTIMAL => Status::Optimal,
-            HIGHS_MODEL_STATUS_INFEASIBLE => Status::Infeasible,
-            HIGHS_MODEL_STATUS_UNBOUNDED | HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE => {
-                Status::Unbounded
-            }
-            _ => Status::Undefined,
-        }
     }
 
     /// Build a new HiGHS model for the given polyhedron
@@ -264,20 +248,22 @@ impl Solver for HighsSolver {
             }
 
             // Solve
-            let status = unsafe { Highs_run(highs_ptr) };
-            if status != 0 {
-                solutions.push(ApiSolution {
-                    status: Status::Undefined,
-                    objective: 0,
-                    solution: HashMap::new(),
-                    error: Some(format!("HiGHS solve failed with status {}", status)),
-                });
-                continue;
-            }
-
-            // Get model status
+            let run_status = unsafe { Highs_run(highs_ptr) };
             let model_status = unsafe { Highs_getModelStatus(highs_ptr) };
-            let api_status = Self::convert_status(model_status);
+            let mut primal_solution_status: HighsInt = 0;
+            unsafe {
+                let info = CString::new("primal_solution_status").unwrap();
+                Highs_getIntInfoValue(highs_ptr, info.as_ptr(), &mut primal_solution_status);
+            }
+            let api_status =
+                match solve_outcome::highs(run_status, model_status, primal_solution_status) {
+                    Outcome::Optimal => Status::Optimal,
+                    Outcome::Feasible => Status::Feasible,
+                    Outcome::Failed(error) => {
+                        solutions.push(solve_outcome::failed_solution(error));
+                        continue;
+                    }
+                };
 
             // Extract solution
             let mut solution_values = vec![0.0; n_cols as usize];

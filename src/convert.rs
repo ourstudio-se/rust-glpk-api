@@ -1,3 +1,4 @@
+use crate::domain::solve_outcome::{self, Outcome};
 use crate::models::{
     ApiIntegerSparseMatrix, ApiSolution, ObjectiveOwned, SparseLEIntegerPolyhedron, Status,
 };
@@ -61,15 +62,20 @@ impl From<GlpkStatus> for Status {
 
 impl From<Solution> for ApiSolution {
     fn from(s: Solution) -> Self {
+        let status = match solve_outcome::glpk(s.status as i32, s.error.as_deref()) {
+            Outcome::Optimal => Status::Optimal,
+            Outcome::Feasible => Status::Feasible,
+            Outcome::Failed(error) => return solve_outcome::failed_solution(error),
+        };
         ApiSolution {
-            status: s.status.into(),
+            status,
             objective: s.objective as i32, // Match current api contract
             solution: s
                 .solution
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
-            error: s.error,
+            error: None,
         }
     }
 }
