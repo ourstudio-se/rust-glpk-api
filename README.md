@@ -340,6 +340,8 @@ Problem is infeasible or unbounded: GLPK reported glp_intopt GLP_EROOT (12)
 
 The summary is one of `Problem is infeasible`, `Problem is unbounded`, `Problem is infeasible or unbounded`, `Time limit reached without a solution` or `Solver failed`.
 
+Exception: when GLPK reaches its time limit (`MAX_GLPK_SOLVE_MS`), the whole request fails with HTTP 504 instead.
+
 The other values of the `Status` enum (Undefined, Infeasible, NoFeasible, Unbounded, SimplexFailed, EmptySpace) are kept for compatibility but are no longer returned.
 
 ## ⚙️ Configuration

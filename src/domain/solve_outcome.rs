@@ -107,7 +107,7 @@ pub fn glpk(status: i32, error: Option<&str>) -> Outcome {
         7 => "glp_simplex", // Status::SimplexFailed
         8 => "glp_intopt",  // Status::MIPFailed
         other => {
-            return failed(Failure::SolverFailed, SOLVER, "status", other);
+            return failed(Failure::SolverFailed, SOLVER, "UNKNOWN", other);
         }
     };
 
@@ -116,24 +116,23 @@ pub fn glpk(status: i32, error: Option<&str>) -> Outcome {
         .rsplit_once("code: ")
         .and_then(|(_, c)| c.trim().parse::<i32>().ok());
     let Some(code) = code else {
-        return Outcome::Failed(format!(
-            "{}: {} reported {}",
-            Failure::SolverFailed.summary(),
-            SOLVER,
-            error
-        ));
+        // Return code not found in the text: keep the raw text, with the status code
+        let name = if error.is_empty() { routine } else { error };
+        return failed(Failure::SolverFailed, SOLVER, name, status);
     };
 
     let failure = match code {
         10 => Failure::Infeasible,                 // GLP_ENOPFS
         11 | 12 => Failure::InfeasibleOrUnbounded, // GLP_ENODFS, GLP_EROOT
-        9 => Failure::TimeLimit,                   // GLP_ETMLIM
+        // GLP_ETMLIM: not reached today, glpk-rust returns Err(TimeLimitExceeded) (HTTP 504)
+        9 => Failure::TimeLimit,
         _ => Failure::SolverFailed,
     };
-    let name = match glpk_return_code_name(code) {
-        Some(n) => format!("{} {}", routine, n),
-        None => routine.to_string(),
-    };
+    let name = format!(
+        "{} {}",
+        routine,
+        glpk_return_code_name(code).unwrap_or("UNKNOWN")
+    );
     failed(failure, SOLVER, &name, code)
 }
 
@@ -278,11 +277,19 @@ mod tests {
         );
         assert_eq!(
             glpk(8, Some("GLPK MIP solver failed with code: 99")),
-            err("Solver failed: GLPK reported glp_intopt (99)")
+            err("Solver failed: GLPK reported glp_intopt UNKNOWN (99)")
         );
         assert_eq!(
             glpk(8, Some("something unexpected")),
-            err("Solver failed: GLPK reported something unexpected")
+            err("Solver failed: GLPK reported something unexpected (8)")
+        );
+        assert_eq!(
+            glpk(7, None),
+            err("Solver failed: GLPK reported glp_simplex (7)")
+        );
+        assert_eq!(
+            glpk(42, None),
+            err("Solver failed: GLPK reported UNKNOWN (42)")
         );
         assert_eq!(
             glpk(4, Some("No feasible solution exists")),
