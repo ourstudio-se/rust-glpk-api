@@ -1,3 +1,4 @@
+use crate::domain::solve_outcome::{self, Outcome};
 use crate::models::{
     ApiIntegerSparseMatrix, ApiSolution, ObjectiveOwned, SparseLEIntegerPolyhedron, Status,
 };
@@ -5,7 +6,7 @@ use std::collections::HashMap;
 
 use glpk_rust::{
     Bound, IntegerSparseMatrix as GlpkMatrix, Solution, SparseLEIntegerPolyhedron as GlpkPoly,
-    Status as GlpkStatus, Variable as GlpkVar,
+    Variable as GlpkVar,
 };
 
 pub fn to_borrowed_objective(obj: &ObjectiveOwned) -> HashMap<&str, f64> {
@@ -42,34 +43,22 @@ fn to_glpk_matrix(m: &ApiIntegerSparseMatrix) -> GlpkMatrix {
     }
 }
 
-impl From<GlpkStatus> for Status {
-    fn from(s: GlpkStatus) -> Self {
-        // Assumes your crate uses the same variant names
-        match s {
-            GlpkStatus::Undefined => Status::Undefined,
-            GlpkStatus::Feasible => Status::Feasible,
-            GlpkStatus::Infeasible => Status::Infeasible,
-            GlpkStatus::NoFeasible => Status::NoFeasible,
-            GlpkStatus::Optimal => Status::Optimal,
-            GlpkStatus::Unbounded => Status::Unbounded,
-            GlpkStatus::SimplexFailed => Status::SimplexFailed,
-            GlpkStatus::MIPFailed => Status::MIPFailed,
-            GlpkStatus::EmptySpace => Status::EmptySpace,
-        }
-    }
-}
-
 impl From<Solution> for ApiSolution {
     fn from(s: Solution) -> Self {
+        let status = match solve_outcome::glpk(s.status as i32, s.error.as_deref()) {
+            Outcome::Optimal => Status::Optimal,
+            Outcome::Feasible => Status::Feasible,
+            Outcome::Failed(error) => return solve_outcome::failed_solution(error),
+        };
         ApiSolution {
-            status: s.status.into(),
+            status,
             objective: s.objective as i32, // Match current api contract
             solution: s
                 .solution
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
-            error: s.error,
+            error: None,
         }
     }
 }

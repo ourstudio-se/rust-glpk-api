@@ -49,7 +49,8 @@ jobs:
         uses: actions-rust-lang/audit@v1
         with:
           # h2 0.3.27 via actix-http; no 0.3 patch (RUSTSEC-2026-0258 is 0.4.16+ only)
-          ignore: RUSTSEC-2026-0258
+          # cookie 0.16.2 via actix-web 4.x; only affects the `private` feature, which is not enabled (RUSTSEC-2026-0594)
+          ignore: RUSTSEC-2026-0258,RUSTSEC-2026-0594
 
   scan:
     name: Scan Docker image

@@ -1,4 +1,5 @@
 use crate::convert::to_glpk_polyhedron;
+use crate::domain::solve_outcome::{self, Outcome};
 use crate::domain::solver::Solver;
 use crate::domain::validate::{validate_objectives_owned, SolveError};
 use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
@@ -48,16 +49,6 @@ impl GurobiSolver {
     /// Create solver with caching disabled
     pub fn without_cache() -> Self {
         GurobiSolver { model_cache: None }
-    }
-
-    /// Convert Gurobi status to our API status
-    fn convert_status(status: grb::Status) -> Status {
-        match status {
-            grb::Status::Optimal => Status::Optimal,
-            grb::Status::Infeasible => Status::Infeasible,
-            grb::Status::InfOrUnbd | grb::Status::Unbounded => Status::Unbounded,
-            _ => Status::Undefined,
-        }
     }
 
     /// Build a new Gurobi model for the given polyhedron
@@ -252,7 +243,18 @@ impl Solver for GurobiSolver {
                 .model
                 .status()
                 .map_err(|e| SolveError::input(format!("Failed to get model status: {}", e)))?;
-            let status = Self::convert_status(model_status);
+            let sol_count = model_lock
+                .model
+                .get_attr(attr::SolCount)
+                .map_err(|e| SolveError::input(format!("Failed to get solution count: {}", e)))?;
+            let status = match solve_outcome::gurobi(model_status as i32, sol_count) {
+                Outcome::Optimal => Status::Optimal,
+                Outcome::Feasible => Status::Feasible,
+                Outcome::Failed(error) => {
+                    solutions.push(solve_outcome::failed_solution(error));
+                    continue;
+                }
+            };
 
             // Map solution back to variable names
             let mut solution_map: HashMap<String, i32> = HashMap::new();

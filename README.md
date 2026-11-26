@@ -323,17 +323,26 @@ This standard formulation allows you to express a wide variety of optimization p
 
 ## 📊 Status Codes
 
-| Code | Status | Description |
-|------|--------|-------------|
-| 1 | Undefined | Solution status is undefined |
-| 2 | Feasible | Solution is feasible |
-| 3 | Infeasible | Problem is infeasible |
-| 4 | NoFeasible | No feasible solution exists |
-| 5 | Optimal | Optimal solution found |
-| 6 | Unbounded | Problem is unbounded |
-| 7 | SimplexFailed | Simplex method failed |
-| 8 | MIPFailed | Mixed-integer programming failed |
-| 9 | EmptySpace | Search space is empty |
+All solvers (GLPK, HiGHS, Gurobi) return the same `status` for the same outcome:
+
+| Status | Meaning | `solution` | `objective` | `error` |
+|--------|---------|------------|-------------|---------|
+| Optimal | Optimal solution found | filled in | filled in | `null` |
+| Feasible | A solution was found, but not proven optimal (e.g. a limit was reached) | filled in | filled in | `null` |
+| MIPFailed | No solution | `{}` | `0` | see below |
+
+For `MIPFailed`, `error` has the format `<Summary>: <Solver> reported <NAME> (<code>)`, where `<NAME> (<code>)` is the solver's own status, for example:
+
+```
+Problem is infeasible: HiGHS reported kInfeasible (8)
+Problem is infeasible or unbounded: GLPK reported glp_intopt GLP_EROOT (12)
+```
+
+The summary is one of `Problem is infeasible`, `Problem is unbounded`, `Problem is infeasible or unbounded`, `Time limit reached without a solution` or `Solver failed`.
+
+Exception: when GLPK reaches its time limit (`MAX_GLPK_SOLVE_MS`), the whole request fails with HTTP 504 instead.
+
+The other values of the `Status` enum (Undefined, Infeasible, NoFeasible, Unbounded, SimplexFailed, EmptySpace) are kept for compatibility but are no longer returned.
 
 ## ⚙️ Configuration
 

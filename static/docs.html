@@ -246,58 +246,36 @@
         </div>
 
         <h2>📊 Status Codes</h2>
+        <p>All solvers (GLPK, HiGHS, Gurobi) return the same <code>status</code> for the same outcome:</p>
         <table>
             <tr>
-                <th>Code</th>
                 <th>Status</th>
-                <th>Description</th>
+                <th>Meaning</th>
+                <th>solution / objective / error</th>
             </tr>
             <tr>
-                <td>1</td>
-                <td>Undefined</td>
-                <td>Solution status is undefined</td>
-            </tr>
-            <tr>
-                <td>2</td>
-                <td>Feasible</td>
-                <td>Solution is feasible</td>
-            </tr>
-            <tr>
-                <td>3</td>
-                <td>Infeasible</td>
-                <td>Problem is infeasible</td>
-            </tr>
-            <tr>
-                <td>4</td>
-                <td>NoFeasible</td>
-                <td>No feasible solution exists</td>
-            </tr>
-            <tr>
-                <td>5</td>
                 <td>Optimal</td>
                 <td>Optimal solution found</td>
+                <td>filled in / filled in / <code>null</code></td>
             </tr>
             <tr>
-                <td>6</td>
-                <td>Unbounded</td>
-                <td>Problem is unbounded</td>
+                <td>Feasible</td>
+                <td>A solution was found, but not proven optimal (e.g. a limit was reached)</td>
+                <td>filled in / filled in / <code>null</code></td>
             </tr>
             <tr>
-                <td>7</td>
-                <td>SimplexFailed</td>
-                <td>Simplex method failed</td>
-            </tr>
-            <tr>
-                <td>8</td>
                 <td>MIPFailed</td>
-                <td>Mixed-integer programming failed</td>
-            </tr>
-            <tr>
-                <td>9</td>
-                <td>EmptySpace</td>
-                <td>Search space is empty</td>
+                <td>No solution</td>
+                <td><code>{}</code> / <code>0</code> / see below</td>
             </tr>
         </table>
+        <p>For <code>MIPFailed</code>, <code>error</code> has the format <code>&lt;Summary&gt;: &lt;Solver&gt; reported &lt;NAME&gt; (&lt;code&gt;)</code>,
+        for example <code>Problem is infeasible: HiGHS reported kInfeasible (8)</code>. The summary is one of
+        <code>Problem is infeasible</code>, <code>Problem is unbounded</code>, <code>Problem is infeasible or unbounded</code>,
+        <code>Time limit reached without a solution</code> or <code>Solver failed</code>.
+        Exception: when GLPK reaches its time limit (<code>MAX_GLPK_SOLVE_MS</code>), the whole request fails with HTTP 504 instead.</p>
+        <p>The other values of the <code>Status</code> enum (Undefined, Infeasible, NoFeasible, Unbounded, SimplexFailed, EmptySpace)
+        are kept for compatibility but are no longer returned.</p>
 
         <h2>🔧 Matrix Format</h2>
         <p>The constraint matrix uses <strong>sparse format</strong> with separate arrays for:</p>
