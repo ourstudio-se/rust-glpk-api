@@ -1,4 +1,5 @@
-use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron};
+use crate::domain::outcome::SolveOutcome;
+use crate::models::{SolverDirection, SparseLEIntegerPolyhedron};
 use std::collections::HashMap;
 
 pub use crate::domain::validate::{SolveError, SolveErrorType};
@@ -14,14 +15,16 @@ pub trait Solver: Send + Sync {
     /// * `use_presolve` - Enable/disable presolve optimization
     ///
     /// # Returns
-    /// A vector of solutions, one for each objective function
+    /// One `SolveOutcome` per objective function, in the same order.
+    /// `Err` is only returned when the request as a whole cannot be solved
+    /// (e.g. the model cannot be built or the time limit is exceeded).
     fn solve(
         &self,
-        polyhedron: SparseLEIntegerPolyhedron,
-        objectives: Vec<HashMap<String, f64>>,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        objectives: &[HashMap<String, f64>],
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveError>;
+    ) -> Result<Vec<SolveOutcome>, SolveError>;
 
     /// Get the solver name for logging/debugging
     fn name(&self) -> &str;

@@ -213,6 +213,95 @@ async fn test_solve_minimize_direction() {
 
 #[tokio::test]
 #[serial]
+async fn test_solve_infeasible_problem_returns_mipfailed_with_empty_solution() {
+    let _server = TestServer::start(None);
+    let client = reqwest::Client::new();
+
+    // x <= 3 with x in [5, 10] has no solution
+    let request_body = json!({
+        "polyhedron": {
+            "A": {
+                "rows": [0],
+                "cols": [0],
+                "vals": [1],
+                "shape": {"nrows": 1, "ncols": 1}
+            },
+            "b": [3],
+            "variables": [
+                {"id": "x", "bound": [5, 10]}
+            ]
+        },
+        "objectives": [
+            {"x": 1}
+        ],
+        "direction": "maximize"
+    });
+
+    let response = client
+        .post(format!("{}/solve", _server.base_url()))
+        .json(&request_body)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse JSON response");
+
+    let solution = &body["solutions"][0];
+    assert_eq!(solution["status"], "MIPFailed");
+    assert_eq!(solution["solution"], json!({}));
+    assert_eq!(solution["objective"], 0);
+    assert!(solution["error"].is_string());
+}
+
+#[tokio::test]
+#[serial]
+async fn test_solve_invalid_variable_bounds_returns_422() {
+    let _server = TestServer::start(None);
+    let client = reqwest::Client::new();
+
+    let request_body = json!({
+        "polyhedron": {
+            "A": {
+                "rows": [0],
+                "cols": [0],
+                "vals": [1],
+                "shape": {"nrows": 1, "ncols": 1}
+            },
+            "b": [3],
+            "variables": [
+                {"id": "x", "bound": [5, 3]}
+            ]
+        },
+        "objectives": [
+            {"x": 1}
+        ],
+        "direction": "maximize"
+    });
+
+    let response = client
+        .post(format!("{}/solve", _server.base_url()))
+        .json(&request_body)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(response.status(), 422);
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse JSON response");
+
+    assert!(body["error"].is_string());
+}
+
+#[tokio::test]
+#[serial]
 async fn test_nonexistent_endpoint() {
     let _server = TestServer::start(None);
     let client = reqwest::Client::new();

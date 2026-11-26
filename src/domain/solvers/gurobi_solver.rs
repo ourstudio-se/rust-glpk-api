@@ -1,7 +1,6 @@
-use crate::convert::to_glpk_polyhedron;
-use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveError};
-use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
+use crate::domain::outcome::SolveOutcome;
+use crate::domain::solver::{SolveError, Solver};
+use crate::models::{SolverDirection, SparseLEIntegerPolyhedron};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -48,16 +47,6 @@ impl GurobiSolver {
     /// Create solver with caching disabled
     pub fn without_cache() -> Self {
         GurobiSolver { model_cache: None }
-    }
-
-    /// Convert Gurobi status to our API status
-    fn convert_status(status: grb::Status) -> Status {
-        match status {
-            grb::Status::Optimal => Status::Optimal,
-            grb::Status::Infeasible => Status::Infeasible,
-            grb::Status::InfOrUnbd | grb::Status::Unbounded => Status::Unbounded,
-            _ => Status::Undefined,
-        }
     }
 
     /// Build a new Gurobi model for the given polyhedron
@@ -201,17 +190,13 @@ impl GurobiSolver {
 impl Solver for GurobiSolver {
     fn solve(
         &self,
-        polyhedron: SparseLEIntegerPolyhedron,
-        objectives: Vec<HashMap<String, f64>>,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        objectives: &[HashMap<String, f64>],
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> std::result::Result<Vec<ApiSolution>, SolveError> {
-        // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
-
+    ) -> std::result::Result<Vec<SolveOutcome>, SolveError> {
         // Get or build cached model
-        let cached_model = self.obtain_model(&polyhedron, use_presolve)?;
+        let cached_model = self.obtain_model(polyhedron, use_presolve)?;
         let mut model_lock = cached_model.lock();
 
         let sense = match direction {
@@ -219,82 +204,235 @@ impl Solver for GurobiSolver {
             SolverDirection::Minimize => ModelSense::Minimize,
         };
 
-        let mut solutions = Vec::new();
-
-        // Solve each objective by updating objective coefficients
-        for objective in objectives {
-            // Build objective expression
-            let obj_expr = polyhedron.variables.iter().enumerate().fold(
-                Expr::Constant(0.0),
-                |acc, (idx, var)| {
-                    let coeff = objective.get(&var.id).copied().unwrap_or(0.0);
-                    if coeff != 0.0 {
-                        acc + coeff * model_lock.vars[idx]
-                    } else {
-                        acc
-                    }
-                },
-            );
-
-            model_lock
-                .model
-                .set_objective(obj_expr, sense)
-                .map_err(|e| SolveError::input(format!("Failed to set objective: {}", e)))?;
-
-            // Optimize
-            model_lock
-                .model
-                .optimize()
-                .map_err(|e| SolveError::input(format!("Failed to optimize: {}", e)))?;
-
-            // Extract solution
-            let model_status = model_lock
-                .model
-                .status()
-                .map_err(|e| SolveError::input(format!("Failed to get model status: {}", e)))?;
-            let status = Self::convert_status(model_status);
-
-            // Map solution back to variable names
-            let mut solution_map: HashMap<String, i32> = HashMap::new();
-            for (idx, var) in polyhedron.variables.iter().enumerate() {
-                let (lower, upper) = var.bound;
-
-                // Get solution value, or use fixed value if variable was eliminated by presolve
-                let value = model_lock
-                    .model
-                    .get_obj_attr(attr::X, &model_lock.vars[idx])
-                    .unwrap_or_else(|_| {
-                        // If variable is fixed (lower == upper), use the fixed value
-                        if lower == upper {
-                            lower as f64
-                        } else {
-                            0.0
-                        }
-                    });
-
-                solution_map.insert(var.id.clone(), value.round() as i32);
-            }
-
-            // Calculate objective value
-            let objective_value: f64 = solution_map
-                .iter()
-                .filter_map(|(var_id, &val)| {
-                    objective.get(var_id).map(|coeff| coeff * (val as f64))
-                })
-                .sum();
-
-            solutions.push(ApiSolution {
-                status,
-                objective: objective_value.round() as i32,
-                solution: solution_map,
-                error: None,
-            });
-        }
-
-        Ok(solutions)
+        Ok(objectives
+            .iter()
+            .map(|objective| solve_objective(&mut model_lock, polyhedron, objective, sense))
+            .collect())
     }
 
     fn name(&self) -> &str {
         "Gurobi"
+    }
+}
+
+/// Solve a single objective: set objective → optimize → classify → read solution.
+fn solve_objective(
+    gurobi: &mut GurobiModel,
+    polyhedron: &SparseLEIntegerPolyhedron,
+    objective: &HashMap<String, f64>,
+    sense: ModelSense,
+) -> SolveOutcome {
+    // Build objective expression
+    let obj_expr =
+        polyhedron
+            .variables
+            .iter()
+            .enumerate()
+            .fold(Expr::Constant(0.0), |acc, (idx, var)| {
+                let coeff = objective.get(&var.id).copied().unwrap_or(0.0);
+                if coeff != 0.0 {
+                    acc + coeff * gurobi.vars[idx]
+                } else {
+                    acc
+                }
+            });
+
+    if let Err(e) = gurobi.model.set_objective(obj_expr, sense) {
+        return SolveOutcome::Failed {
+            raw: format!("Gurobi: failed to set objective: {}", e),
+        };
+    }
+
+    if let Err(e) = gurobi.model.optimize() {
+        return SolveOutcome::Failed {
+            raw: format!("Gurobi: failed to optimize: {}", e),
+        };
+    }
+
+    let status = match gurobi.model.status() {
+        Ok(status) => status,
+        Err(e) => {
+            return SolveOutcome::Failed {
+                raw: format!("Gurobi: failed to get model status: {}", e),
+            }
+        }
+    };
+    let solution_count = gurobi.model.get_attr(attr::SolCount).unwrap_or(0);
+
+    match classify_status(status, solution_count) {
+        RunResult::Optimal => {
+            let (values, objective) = read_solution(gurobi, polyhedron, objective);
+            SolveOutcome::Optimal { values, objective }
+        }
+        RunResult::Feasible => {
+            let (values, objective) = read_solution(gurobi, polyhedron, objective);
+            SolveOutcome::Feasible { values, objective }
+        }
+        RunResult::NoSolution(outcome) => outcome,
+    }
+}
+
+/// How a finished Gurobi optimization should be handled.
+#[derive(Debug, PartialEq)]
+enum RunResult {
+    /// Proven optimal: read the solution.
+    Optimal,
+    /// Stopped early but with at least one solution: read the solution.
+    Feasible,
+    /// No usable solution: return this outcome as is.
+    NoSolution(SolveOutcome),
+}
+
+/// Decide what a Gurobi status means. Pure function, no solver calls.
+fn classify_status(status: grb::Status, solution_count: i32) -> RunResult {
+    let raw = format!("Gurobi: status {:?}", status);
+
+    match status {
+        grb::Status::Optimal => RunResult::Optimal,
+        grb::Status::Infeasible => RunResult::NoSolution(SolveOutcome::Infeasible { raw }),
+        grb::Status::InfOrUnbd | grb::Status::Unbounded => {
+            RunResult::NoSolution(SolveOutcome::Unbounded { raw })
+        }
+        // No solve has finished, so any solution count is not from this run.
+        grb::Status::Loaded | grb::Status::InProgress => {
+            RunResult::NoSolution(SolveOutcome::Failed { raw })
+        }
+        // Stopped before proving optimality (time limit, SubOptimal,
+        // WorkLimit, MemLimit, ...). Gurobi only keeps feasible solutions,
+        // so a non-zero solution count means a usable incumbent.
+        _ if solution_count > 0 => RunResult::Feasible,
+        _ => RunResult::NoSolution(SolveOutcome::Failed { raw }),
+    }
+}
+
+/// Read variable values and objective value of the current solution.
+fn read_solution(
+    gurobi: &GurobiModel,
+    polyhedron: &SparseLEIntegerPolyhedron,
+    objective: &HashMap<String, f64>,
+) -> (HashMap<String, i32>, i32) {
+    // Map solution back to variable names
+    let mut solution_map: HashMap<String, i32> = HashMap::new();
+    for (idx, var) in polyhedron.variables.iter().enumerate() {
+        let (lower, upper) = var.bound;
+
+        // Get solution value, or use fixed value if variable was eliminated by presolve
+        let value = gurobi
+            .model
+            .get_obj_attr(attr::X, &gurobi.vars[idx])
+            .unwrap_or_else(|_| {
+                // If variable is fixed (lower == upper), use the fixed value
+                if lower == upper {
+                    lower as f64
+                } else {
+                    0.0
+                }
+            });
+
+        solution_map.insert(var.id.clone(), value.round() as i32);
+    }
+
+    // Calculate objective value
+    let objective_value: f64 = solution_map
+        .iter()
+        .filter_map(|(var_id, &val)| objective.get(var_id).map(|coeff| coeff * (val as f64)))
+        .sum();
+
+    (solution_map, objective_value.round() as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimal_status_reads_solution() {
+        assert_eq!(classify_status(grb::Status::Optimal, 1), RunResult::Optimal);
+    }
+
+    #[test]
+    fn infeasible_status_is_infeasible() {
+        assert_eq!(
+            classify_status(grb::Status::Infeasible, 0),
+            RunResult::NoSolution(SolveOutcome::Infeasible {
+                raw: "Gurobi: status Infeasible".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn inf_or_unbd_status_is_unbounded() {
+        assert_eq!(
+            classify_status(grb::Status::InfOrUnbd, 0),
+            RunResult::NoSolution(SolveOutcome::Unbounded {
+                raw: "Gurobi: status InfOrUnbd".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn unbounded_status_is_unbounded() {
+        assert!(matches!(
+            classify_status(grb::Status::Unbounded, 0),
+            RunResult::NoSolution(SolveOutcome::Unbounded { .. })
+        ));
+    }
+
+    #[test]
+    fn time_limit_with_solution_is_feasible() {
+        assert_eq!(
+            classify_status(grb::Status::TimeLimit, 1),
+            RunResult::Feasible
+        );
+    }
+
+    #[test]
+    fn time_limit_without_solution_is_failed() {
+        assert_eq!(
+            classify_status(grb::Status::TimeLimit, 0),
+            RunResult::NoSolution(SolveOutcome::Failed {
+                raw: "Gurobi: status TimeLimit".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn stopped_early_with_solution_is_feasible() {
+        for status in [
+            grb::Status::SubOptimal,
+            grb::Status::UserObjLimit,
+            grb::Status::WorkLimit,
+            grb::Status::MemLimit,
+            grb::Status::Numeric,
+        ] {
+            assert_eq!(
+                classify_status(status, 3),
+                RunResult::Feasible,
+                "{:?}",
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn unfinished_solve_is_failed_even_with_solution_count() {
+        for status in [grb::Status::Loaded, grb::Status::InProgress] {
+            assert!(
+                matches!(
+                    classify_status(status, 1),
+                    RunResult::NoSolution(SolveOutcome::Failed { .. })
+                ),
+                "{:?}",
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn other_status_is_failed() {
+        assert!(matches!(
+            classify_status(grb::Status::Numeric, 0),
+            RunResult::NoSolution(SolveOutcome::Failed { .. })
+        ));
     }
 }

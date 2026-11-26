@@ -1,7 +1,6 @@
-use crate::convert::to_glpk_polyhedron;
-use crate::domain::solver::Solver;
-use crate::domain::validate::{validate_objectives_owned, SolveError};
-use crate::models::{ApiSolution, SolverDirection, SparseLEIntegerPolyhedron, Status};
+use crate::domain::outcome::SolveOutcome;
+use crate::domain::solver::{SolveError, Solver};
+use crate::models::{SolverDirection, SparseLEIntegerPolyhedron};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_void;
@@ -66,23 +65,6 @@ impl HighsSolver {
         HighsSolver { model_cache: None }
     }
 
-    /// Convert HiGHS status to our API status
-    fn convert_status(status: i32) -> Status {
-        const HIGHS_MODEL_STATUS_OPTIMAL: i32 = 7;
-        const HIGHS_MODEL_STATUS_INFEASIBLE: i32 = 8;
-        const HIGHS_MODEL_STATUS_UNBOUNDED: i32 = 10;
-        const HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE: i32 = 9;
-
-        match status {
-            HIGHS_MODEL_STATUS_OPTIMAL => Status::Optimal,
-            HIGHS_MODEL_STATUS_INFEASIBLE => Status::Infeasible,
-            HIGHS_MODEL_STATUS_UNBOUNDED | HIGHS_MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE => {
-                Status::Unbounded
-            }
-            _ => Status::Undefined,
-        }
-    }
-
     /// Build a new HiGHS model for the given polyhedron
     fn build_model(
         &self,
@@ -97,39 +79,50 @@ impl HighsSolver {
         if highs_ptr.is_null() {
             return Err(SolveError::input("Failed to create HiGHS instance"));
         }
+        // Owned from here on: if any step below fails, `Drop` frees the instance.
+        let model = HighsModel { highs_ptr, n_cols };
 
         // Set options
-        unsafe {
-            let presolve_str = if use_presolve {
-                CString::new("on").unwrap()
-            } else {
-                CString::new("off").unwrap()
-            };
-            let option_name = CString::new("presolve").unwrap();
-            Highs_setStringOptionValue(highs_ptr, option_name.as_ptr(), presolve_str.as_ptr());
+        let presolve_str = if use_presolve {
+            CString::new("on").unwrap()
+        } else {
+            CString::new("off").unwrap()
+        };
+        let option_name = CString::new("presolve").unwrap();
+        check_build_step(
+            unsafe {
+                Highs_setStringOptionValue(highs_ptr, option_name.as_ptr(), presolve_str.as_ptr())
+            },
+            "Highs_setStringOptionValue(presolve)",
+        )?;
 
-            // Disable output
-            let output_flag = CString::new("output_flag").unwrap();
-            Highs_setBoolOptionValue(highs_ptr, output_flag.as_ptr(), 0);
-        }
+        // Disable output
+        let output_flag = CString::new("output_flag").unwrap();
+        check_build_step(
+            unsafe { Highs_setBoolOptionValue(highs_ptr, output_flag.as_ptr(), 0) },
+            "Highs_setBoolOptionValue(output_flag)",
+        )?;
 
         // Prepare row bounds (Ax <= b means -inf <= Ax <= b)
         let row_lower = vec![f64::NEG_INFINITY; n_rows as usize];
         let row_upper: Vec<f64> = polyhedron.b.iter().map(|&b| b as f64).collect();
 
         // Add rows FIRST (before columns reference them)
-        unsafe {
-            Highs_addRows(
-                highs_ptr,
-                n_rows,
-                row_lower.as_ptr(),
-                row_upper.as_ptr(),
-                0, // num_nz = 0, will add via columns
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-            );
-        }
+        check_build_step(
+            unsafe {
+                Highs_addRows(
+                    highs_ptr,
+                    n_rows,
+                    row_lower.as_ptr(),
+                    row_upper.as_ptr(),
+                    0, // num_nz = 0, will add via columns
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            },
+            "Highs_addRows",
+        )?;
 
         // Build sparse constraint matrix in CSC (Column Sparse Compressed) format
         let mut col_start: Vec<i32> = Vec::with_capacity((n_cols + 1) as usize);
@@ -143,7 +136,7 @@ impl HighsSolver {
             // Find all entries for this column
             for i in 0..polyhedron.a.rows.len() {
                 if polyhedron.a.cols[i] as usize == col_idx {
-                    col_index.push(polyhedron.a.rows[i] as i32);
+                    col_index.push(polyhedron.a.rows[i]);
                     col_value.push(polyhedron.a.vals[i] as f64);
                 }
             }
@@ -164,28 +157,32 @@ impl HighsSolver {
             .collect();
 
         // Add columns with constraints
-        unsafe {
-            Highs_addCols(
-                highs_ptr,
-                n_cols,
-                col_costs.as_ptr(),
-                col_lower.as_ptr(),
-                col_upper.as_ptr(),
-                col_index.len() as i32,
-                col_start.as_ptr(),
-                col_index.as_ptr(),
-                col_value.as_ptr(),
-            );
-        }
+        check_build_step(
+            unsafe {
+                Highs_addCols(
+                    highs_ptr,
+                    n_cols,
+                    col_costs.as_ptr(),
+                    col_lower.as_ptr(),
+                    col_upper.as_ptr(),
+                    col_index.len() as i32,
+                    col_start.as_ptr(),
+                    col_index.as_ptr(),
+                    col_value.as_ptr(),
+                )
+            },
+            "Highs_addCols",
+        )?;
 
         // Set integrality for all columns
         for col_idx in 0..n_cols {
-            unsafe {
-                Highs_changeColIntegrality(highs_ptr, col_idx, 1); // 1 = integer
-            }
+            check_build_step(
+                unsafe { Highs_changeColIntegrality(highs_ptr, col_idx, 1) }, // 1 = integer
+                "Highs_changeColIntegrality",
+            )?;
         }
 
-        Ok(Arc::new(Mutex::new(HighsModel { highs_ptr, n_cols })))
+        Ok(Arc::new(Mutex::new(model)))
     }
 
     /// Get or build a model for the given polyhedron
@@ -204,7 +201,8 @@ impl HighsSolver {
                     }
                 }
 
-                // Not in cache, build new model
+                // Not in cache, build new model.
+                // A failed build returns here and is never stored in the cache.
                 let model = self.build_model(polyhedron, use_presolve)?;
 
                 // Store in cache
@@ -217,7 +215,7 @@ impl HighsSolver {
             } // Caching enabled, proceed to check cache
             None => {
                 // Caching disabled, build new model every time
-                return self.build_model(polyhedron, use_presolve);
+                self.build_model(polyhedron, use_presolve)
             }
         }
     }
@@ -226,101 +224,218 @@ impl HighsSolver {
 impl Solver for HighsSolver {
     fn solve(
         &self,
-        polyhedron: SparseLEIntegerPolyhedron,
-        objectives: Vec<HashMap<String, f64>>,
+        polyhedron: &SparseLEIntegerPolyhedron,
+        objectives: &[HashMap<String, f64>],
         direction: SolverDirection,
         use_presolve: bool,
-    ) -> Result<Vec<ApiSolution>, SolveError> {
-        // Use GLPK polyhedron for validation
-        let glpk_polyhedron = to_glpk_polyhedron(&polyhedron);
-        validate_objectives_owned(&glpk_polyhedron.variables, &objectives)?;
-
+    ) -> Result<Vec<SolveOutcome>, SolveError> {
         // Get or build cached model, then lock mutex for entire solve call
-        let model_mutex = self.obtain_model(&polyhedron, use_presolve)?;
+        let model_mutex = self.obtain_model(polyhedron, use_presolve)?;
         let model = model_mutex.lock();
 
-        let highs_ptr = model.highs_ptr;
-        let n_cols = model.n_cols;
-
-        // Set optimization sense (minimize = 1, maximize = -1)
         let sense = match direction {
-            SolverDirection::Minimize => 1,
-            SolverDirection::Maximize => -1,
+            SolverDirection::Minimize => OBJECTIVE_SENSE_MINIMIZE,
+            SolverDirection::Maximize => OBJECTIVE_SENSE_MAXIMIZE,
         };
-        unsafe {
-            Highs_changeObjectiveSense(highs_ptr, sense);
-        }
+        check_build_step(
+            unsafe { Highs_changeObjectiveSense(model.highs_ptr, sense) },
+            "Highs_changeObjectiveSense",
+        )?;
 
-        let mut solutions = Vec::with_capacity(objectives.len());
-
-        // Solve each objective by updating objective coefficients
-        for objective in objectives {
-            // Update objective coefficients
-            for (col_idx, var) in polyhedron.variables.iter().enumerate() {
-                let obj_coeff = objective.get(&var.id).copied().unwrap_or(0.0);
-                unsafe {
-                    Highs_changeColCost(highs_ptr, col_idx as i32, obj_coeff);
-                }
-            }
-
-            // Solve
-            let status = unsafe { Highs_run(highs_ptr) };
-            if status != 0 {
-                solutions.push(ApiSolution {
-                    status: Status::Undefined,
-                    objective: 0,
-                    solution: HashMap::new(),
-                    error: Some(format!("HiGHS solve failed with status {}", status)),
-                });
-                continue;
-            }
-
-            // Get model status
-            let model_status = unsafe { Highs_getModelStatus(highs_ptr) };
-            let api_status = Self::convert_status(model_status);
-
-            // Extract solution
-            let mut solution_values = vec![0.0; n_cols as usize];
-            unsafe {
-                Highs_getSolution(
-                    highs_ptr,
-                    solution_values.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                );
-            }
-
-            // Map solution back to variable names
-            let mut solution_map: HashMap<String, i32> = HashMap::new();
-            for (col_idx, var) in polyhedron.variables.iter().enumerate() {
-                let value: f64 = solution_values[col_idx];
-                let rounded_value = value.round() as i32;
-                solution_map.insert(var.id.clone(), rounded_value);
-            }
-
-            // Calculate objective value
-            let objective_value: f64 = solution_map
-                .iter()
-                .filter_map(|(var_id, &val)| {
-                    objective.get(var_id).map(|coeff| coeff * (val as f64))
-                })
-                .sum();
-
-            solutions.push(ApiSolution {
-                status: api_status,
-                objective: objective_value.round() as i32,
-                solution: solution_map,
-                error: None,
-            });
-        }
-
-        Ok(solutions)
+        Ok(objectives
+            .iter()
+            .map(|objective| solve_objective(&model, polyhedron, objective))
+            .collect())
     }
 
     fn name(&self) -> &str {
         "HiGHS"
     }
+}
+
+/// Solve a single objective: set objective → run → classify → read solution.
+fn solve_objective(
+    model: &HighsModel,
+    polyhedron: &SparseLEIntegerPolyhedron,
+    objective: &HashMap<String, f64>,
+) -> SolveOutcome {
+    if let Err(raw) = set_objective(model.highs_ptr, polyhedron, objective) {
+        return SolveOutcome::Failed { raw };
+    }
+
+    let run_status = unsafe { Highs_run(model.highs_ptr) };
+    let model_status = unsafe { Highs_getModelStatus(model.highs_ptr) };
+    let has_feasible_solution = has_feasible_solution(model.highs_ptr);
+
+    match classify_run(run_status, model_status, has_feasible_solution) {
+        RunResult::Optimal => match read_solution(model, polyhedron, objective) {
+            Ok((values, objective)) => SolveOutcome::Optimal { values, objective },
+            Err(raw) => SolveOutcome::Failed { raw },
+        },
+        RunResult::Feasible => match read_solution(model, polyhedron, objective) {
+            Ok((values, objective)) => SolveOutcome::Feasible { values, objective },
+            Err(raw) => SolveOutcome::Failed { raw },
+        },
+        RunResult::NoSolution(outcome) => outcome,
+    }
+}
+
+/// How a finished `Highs_run` should be handled.
+#[derive(Debug, PartialEq)]
+enum RunResult {
+    /// Proven optimal: read the solution.
+    Optimal,
+    /// Stopped early but with a feasible solution: read the solution.
+    Feasible,
+    /// No usable solution: return this outcome as is.
+    NoSolution(SolveOutcome),
+}
+
+/// Decide what a finished HiGHS run means. Pure function, no solver calls.
+///
+/// A warning from `Highs_run` is not treated as a failure on its own;
+/// the model status decides.
+fn classify_run(
+    run_status: HighsInt,
+    model_status: HighsInt,
+    has_feasible_solution: bool,
+) -> RunResult {
+    if run_status == STATUS_ERROR {
+        return RunResult::NoSolution(SolveOutcome::Failed {
+            raw: format!("HiGHS: Highs_run returned {} kError", run_status),
+        });
+    }
+
+    let raw = format!(
+        "HiGHS: model status {} {}",
+        model_status,
+        model_status_name(model_status)
+    );
+
+    match model_status {
+        MODEL_STATUS_OPTIMAL => RunResult::Optimal,
+        MODEL_STATUS_INFEASIBLE => RunResult::NoSolution(SolveOutcome::Infeasible { raw }),
+        MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE | MODEL_STATUS_UNBOUNDED => {
+            RunResult::NoSolution(SolveOutcome::Unbounded { raw })
+        }
+        // Error statuses: whatever solution is left over cannot be trusted.
+        MODEL_STATUS_NOTSET
+        | MODEL_STATUS_LOAD_ERROR
+        | MODEL_STATUS_MODEL_ERROR
+        | MODEL_STATUS_PRESOLVE_ERROR
+        | MODEL_STATUS_SOLVE_ERROR
+        | MODEL_STATUS_POSTSOLVE_ERROR
+        | MODEL_STATUS_MODEL_EMPTY => RunResult::NoSolution(SolveOutcome::Failed { raw }),
+        // Stopped before proving optimality (time limit, objective bound,
+        // memory limit, kUnknown, ...) but with a feasible solution.
+        _ if has_feasible_solution => RunResult::Feasible,
+        _ => RunResult::NoSolution(SolveOutcome::Failed { raw }),
+    }
+}
+
+/// Name of a HiGHS model status, as used in the HiGHS documentation.
+fn model_status_name(model_status: HighsInt) -> &'static str {
+    match model_status {
+        MODEL_STATUS_NOTSET => "kNotset",
+        MODEL_STATUS_LOAD_ERROR => "kLoadError",
+        MODEL_STATUS_MODEL_ERROR => "kModelError",
+        MODEL_STATUS_PRESOLVE_ERROR => "kPresolveError",
+        MODEL_STATUS_SOLVE_ERROR => "kSolveError",
+        MODEL_STATUS_POSTSOLVE_ERROR => "kPostsolveError",
+        MODEL_STATUS_MODEL_EMPTY => "kModelEmpty",
+        MODEL_STATUS_OPTIMAL => "kOptimal",
+        MODEL_STATUS_INFEASIBLE => "kInfeasible",
+        MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE => "kUnboundedOrInfeasible",
+        MODEL_STATUS_UNBOUNDED => "kUnbounded",
+        MODEL_STATUS_OBJECTIVE_BOUND => "kObjectiveBound",
+        MODEL_STATUS_OBJECTIVE_TARGET => "kObjectiveTarget",
+        MODEL_STATUS_REACHED_TIME_LIMIT => "kTimeLimit",
+        MODEL_STATUS_REACHED_ITERATION_LIMIT => "kIterationLimit",
+        MODEL_STATUS_UNKNOWN => "kUnknown",
+        MODEL_STATUS_REACHED_SOLUTION_LIMIT => "kSolutionLimit",
+        MODEL_STATUS_REACHED_INTERRUPT => "kInterrupt",
+        MODEL_STATUS_REACHED_MEMORY_LIMIT => "kMemoryLimit",
+        _ => "unknown",
+    }
+}
+
+/// Fail the whole request if a HiGHS call returned an error.
+fn check_build_step(status: HighsInt, call: &str) -> Result<(), SolveError> {
+    if status == STATUS_ERROR {
+        return Err(SolveError::input(format!(
+            "HiGHS: {} returned {} kError",
+            call, status
+        )));
+    }
+    Ok(())
+}
+
+/// Set the objective coefficients for all columns.
+fn set_objective(
+    highs_ptr: *mut c_void,
+    polyhedron: &SparseLEIntegerPolyhedron,
+    objective: &HashMap<String, f64>,
+) -> Result<(), String> {
+    for (col_idx, var) in polyhedron.variables.iter().enumerate() {
+        let obj_coeff = objective.get(&var.id).copied().unwrap_or(0.0);
+        let status = unsafe { Highs_changeColCost(highs_ptr, col_idx as i32, obj_coeff) };
+        if status == STATUS_ERROR {
+            return Err(format!(
+                "HiGHS: Highs_changeColCost returned {} kError",
+                status
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether HiGHS holds a feasible primal solution after the last run.
+fn has_feasible_solution(highs_ptr: *mut c_void) -> bool {
+    let info_name = CString::new("primal_solution_status").unwrap();
+    let mut solution_status: HighsInt = SOLUTION_STATUS_NONE;
+    let status =
+        unsafe { Highs_getIntInfoValue(highs_ptr, info_name.as_ptr(), &mut solution_status) };
+    status != STATUS_ERROR && solution_status == SOLUTION_STATUS_FEASIBLE
+}
+
+/// Read variable values and objective value of the current solution.
+fn read_solution(
+    model: &HighsModel,
+    polyhedron: &SparseLEIntegerPolyhedron,
+    objective: &HashMap<String, f64>,
+) -> Result<(HashMap<String, i32>, i32), String> {
+    let mut solution_values = vec![0.0; model.n_cols as usize];
+    let status = unsafe {
+        Highs_getSolution(
+            model.highs_ptr,
+            solution_values.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if status == STATUS_ERROR {
+        return Err(format!(
+            "HiGHS: Highs_getSolution returned {} kError",
+            status
+        ));
+    }
+
+    // Map solution back to variable names
+    let mut solution_map: HashMap<String, i32> = HashMap::new();
+    for (col_idx, var) in polyhedron.variables.iter().enumerate() {
+        let value: f64 = solution_values[col_idx];
+        let rounded_value = value.round() as i32;
+        solution_map.insert(var.id.clone(), rounded_value);
+    }
+
+    // Calculate objective value
+    let objective_value: f64 = solution_map
+        .iter()
+        .filter_map(|(var_id, &val)| objective.get(var_id).map(|coeff| coeff * (val as f64)))
+        .sum();
+
+    Ok((solution_map, objective_value.round() as i32))
 }
 
 #[cfg(test)]
@@ -366,29 +481,19 @@ mod tests {
 
         // First solve - should build model
         let result1 = solver.solve(
-            polyhedron.clone(),
-            vec![obj1.clone()],
+            &polyhedron,
+            &[obj1.clone()],
             SolverDirection::Maximize,
             true,
         );
         assert!(result1.is_ok());
 
         // Second solve with same polyhedron, different objective - should reuse cached model
-        let result2 = solver.solve(
-            polyhedron.clone(),
-            vec![obj2],
-            SolverDirection::Maximize,
-            true,
-        );
+        let result2 = solver.solve(&polyhedron, &[obj2], SolverDirection::Maximize, true);
         assert!(result2.is_ok());
 
         // Third solve with same polyhedron and objective - should still work
-        let result3 = solver.solve(
-            polyhedron.clone(),
-            vec![obj1],
-            SolverDirection::Maximize,
-            true,
-        );
+        let result3 = solver.solve(&polyhedron, &[obj1], SolverDirection::Maximize, true);
         assert!(result3.is_ok());
     }
 
@@ -401,7 +506,126 @@ mod tests {
         obj.insert("x".to_string(), 1.0);
         obj.insert("y".to_string(), 2.0);
 
-        let result = solver.solve(polyhedron, vec![obj], SolverDirection::Maximize, true);
+        let result = solver.solve(&polyhedron, &[obj], SolverDirection::Maximize, true);
         assert!(result.is_ok());
+    }
+
+    // ---------- classify_run: pure mapping from HiGHS status to outcome ----------
+
+    #[test]
+    fn optimal_status_reads_solution() {
+        assert_eq!(
+            classify_run(STATUS_OK, MODEL_STATUS_OPTIMAL, true),
+            RunResult::Optimal
+        );
+    }
+
+    #[test]
+    fn warning_with_optimal_status_still_reads_solution() {
+        assert_eq!(
+            classify_run(STATUS_WARNING, MODEL_STATUS_OPTIMAL, true),
+            RunResult::Optimal
+        );
+    }
+
+    #[test]
+    fn run_error_is_failed() {
+        assert_eq!(
+            classify_run(STATUS_ERROR, MODEL_STATUS_OPTIMAL, true),
+            RunResult::NoSolution(SolveOutcome::Failed {
+                raw: "HiGHS: Highs_run returned -1 kError".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn infeasible_status_is_infeasible() {
+        assert_eq!(
+            classify_run(STATUS_OK, MODEL_STATUS_INFEASIBLE, false),
+            RunResult::NoSolution(SolveOutcome::Infeasible {
+                raw: "HiGHS: model status 8 kInfeasible".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn unbounded_or_infeasible_status_is_unbounded() {
+        assert_eq!(
+            classify_run(STATUS_OK, MODEL_STATUS_UNBOUNDED_OR_INFEASIBLE, false),
+            RunResult::NoSolution(SolveOutcome::Unbounded {
+                raw: "HiGHS: model status 9 kUnboundedOrInfeasible".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn unbounded_status_is_unbounded() {
+        assert!(matches!(
+            classify_run(STATUS_OK, MODEL_STATUS_UNBOUNDED, false),
+            RunResult::NoSolution(SolveOutcome::Unbounded { .. })
+        ));
+    }
+
+    #[test]
+    fn time_limit_with_feasible_solution_is_feasible() {
+        assert_eq!(
+            classify_run(STATUS_WARNING, MODEL_STATUS_REACHED_TIME_LIMIT, true),
+            RunResult::Feasible
+        );
+    }
+
+    #[test]
+    fn time_limit_without_solution_is_failed() {
+        assert_eq!(
+            classify_run(STATUS_WARNING, MODEL_STATUS_REACHED_TIME_LIMIT, false),
+            RunResult::NoSolution(SolveOutcome::Failed {
+                raw: "HiGHS: model status 13 kTimeLimit".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn stopped_early_with_feasible_solution_is_feasible() {
+        for model_status in [
+            MODEL_STATUS_OBJECTIVE_BOUND,
+            MODEL_STATUS_OBJECTIVE_TARGET,
+            MODEL_STATUS_REACHED_MEMORY_LIMIT,
+            MODEL_STATUS_UNKNOWN,
+        ] {
+            assert_eq!(
+                classify_run(STATUS_WARNING, model_status, true),
+                RunResult::Feasible,
+                "{}",
+                model_status_name(model_status)
+            );
+        }
+    }
+
+    #[test]
+    fn error_status_is_failed_even_with_feasible_solution() {
+        for model_status in [
+            MODEL_STATUS_SOLVE_ERROR,
+            MODEL_STATUS_POSTSOLVE_ERROR,
+            MODEL_STATUS_MODEL_EMPTY,
+        ] {
+            assert!(
+                matches!(
+                    classify_run(STATUS_OK, model_status, true),
+                    RunResult::NoSolution(SolveOutcome::Failed { .. })
+                ),
+                "{}",
+                model_status_name(model_status)
+            );
+        }
+    }
+
+    #[test]
+    fn other_status_is_failed() {
+        assert_eq!(
+            classify_run(STATUS_OK, MODEL_STATUS_MODEL_EMPTY, false),
+            RunResult::NoSolution(SolveOutcome::Failed {
+                raw: "HiGHS: model status 6 kModelEmpty".to_string()
+            })
+        );
     }
 }

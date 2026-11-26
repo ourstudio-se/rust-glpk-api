@@ -169,7 +169,7 @@ SOLVER=highs cargo run --release --features highs-solver
 # Build with Gurobi support
 GUROBI_HOME=/path/to/gurobi cargo build --features gurobi-solver
 
-# Run tests with Gurobi
+# Run tests with Gurobi (not run in CI since it requires a license – run locally when changing Gurobi code)
 GUROBI_HOME=/path/to/gurobi cargo test --features gurobi-solver
 
 # Run in production with Gurobi
@@ -323,17 +323,31 @@ This standard formulation allows you to express a wide variety of optimization p
 
 ## 📊 Status Codes
 
-| Code | Status | Description |
-|------|--------|-------------|
-| 1 | Undefined | Solution status is undefined |
-| 2 | Feasible | Solution is feasible |
-| 3 | Infeasible | Problem is infeasible |
-| 4 | NoFeasible | No feasible solution exists |
-| 5 | Optimal | Optimal solution found |
-| 6 | Unbounded | Problem is unbounded |
-| 7 | SimplexFailed | Simplex method failed |
-| 8 | MIPFailed | Mixed-integer programming failed |
-| 9 | EmptySpace | Search space is empty |
+Every request returns one result per objective. The behaviour is the same regardless of solver (GLPK, HiGHS or Gurobi):
+
+| `status` | Meaning | `solution` / `objective` | `error` |
+|----------|---------|--------------------------|---------|
+| `Optimal` | Proven optimal solution | filled in | `null` |
+| `Feasible` | Valid solution, not proven optimal (e.g. a limit was reached) | filled in | `null` |
+| `MIPFailed` | No usable solution (infeasible, unbounded or solver failure) | `{}` / `0` | `"<summary> (<solver>: <raw solver error>)"` |
+
+Example of a `MIPFailed` result:
+
+```json
+{
+    "status": "MIPFailed",
+    "objective": 0,
+    "solution": {},
+    "error": "Problem is infeasible (HiGHS: model status 8 kInfeasible)"
+}
+```
+
+Guidelines for clients:
+
+- Decide on `status`, not on `error`. The `error` text is meant for humans and its exact wording may change.
+- A `200 OK` response does not mean that every objective was solved – check `status` for each result.
+- Invalid input (e.g. mismatched dimensions, an empty constraint matrix or a variable with `bound[0] > bound[1]`) is rejected with `422` before any solver runs.
+- The status enum also contains `Undefined`, `Infeasible`, `NoFeasible`, `Unbounded`, `SimplexFailed` and `EmptySpace` for backwards compatibility. These are no longer returned.
 
 ## ⚙️ Configuration
 

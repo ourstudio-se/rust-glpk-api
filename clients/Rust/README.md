@@ -189,6 +189,31 @@ match client.solve(request).await {
 }
 ```
 
+### Solution status
+
+A successful response contains one `Solution` per objective. Check `status` on each
+solution – the behaviour is the same regardless of which solver the API runs:
+
+| `Status` | `solution` / `objective` | `error` |
+|----------|--------------------------|---------|
+| `Optimal` | filled in | `None` |
+| `Feasible` (valid, not proven optimal) | filled in | `None` |
+| `MIPFailed` (infeasible, unbounded or solver failure) | empty / `0` | `Some("<summary> (<solver>: <raw solver error>)")` |
+
+```rust
+use glpk_api_sdk::Status;
+
+for solution in response.solutions {
+    match solution.status {
+        Status::Optimal | Status::Feasible => { /* use solution.solution */ },
+        _ => eprintln!("No solution: {}", solution.error.unwrap_or_default()),
+    }
+}
+```
+
+The `error` text is meant for humans; decide on `status`. The other `Status`
+variants are kept for backwards compatibility but are no longer returned.
+
 ## Running Examples
 
 Start the GLPK API server:

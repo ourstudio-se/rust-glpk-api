@@ -4,6 +4,7 @@ mod models;
 
 use models::SolveRequest;
 
+use domain::solve::solve_request;
 use domain::solver::{SolveError, SolveErrorType, Solver};
 use domain::solver_factory::{create_solver_with_cache, SolverType};
 
@@ -50,16 +51,12 @@ pub async fn solve(
         }
     };
 
-    let SolveRequest {
-        polyhedron,
-        objectives,
-        direction,
-    } = req.into_inner();
+    let request = req.into_inner();
     let solve_task_result = tokio::task::spawn_blocking(move || {
         // Hold the permit for the duration of the blocking solver call by moving
         // it into the closure. It will be released automatically when dropped.
         let _permit = permit;
-        solver.solve(polyhedron, objectives, direction, *use_presolve.get_ref())
+        solve_request(solver.get_ref().as_ref(), request, *use_presolve.get_ref())
     })
     .await;
 
@@ -140,6 +137,25 @@ fn validate_solve_request(req: &SolveRequest) -> Result<(), Box<HttpResponse>> {
         );
         let response = unprocessable_response(message);
         return Err(response);
+    }
+
+    if rows_len == 0 {
+        let message = "Constraint matrix A must contain at least one non-zero element".to_string();
+        let response = unprocessable_response(message);
+        return Err(response);
+    }
+
+    // Validate variable bounds (lower must not exceed upper)
+    for variable in &req.polyhedron.variables {
+        let (lower, upper) = variable.bound;
+        if lower > upper {
+            let message = format!(
+                "Variable {} has lower bound {} greater than upper bound {}",
+                variable.id, lower, upper
+            );
+            let response = unprocessable_response(message);
+            return Err(response);
+        }
     }
 
     // Validate sparse matrix indices are within bounds
@@ -513,6 +529,31 @@ mod tests {
         req.polyhedron.b.pop();
         let resp = validate_solve_request(&req).unwrap_err();
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn validate_solve_request_empty_matrix_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.a.rows.clear();
+        req.polyhedron.a.cols.clear();
+        req.polyhedron.a.vals.clear();
+        let resp = validate_solve_request(&req).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn validate_solve_request_lower_bound_greater_than_upper_should_return_422() {
+        let mut req = make_valid_request();
+        req.polyhedron.variables[0].bound = (5, 3);
+        let resp = validate_solve_request(&req).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn validate_solve_request_fixed_variable_is_valid() {
+        let mut req = make_valid_request();
+        req.polyhedron.variables[0].bound = (3, 3);
+        assert!(validate_solve_request(&req).is_ok());
     }
 
     #[test]

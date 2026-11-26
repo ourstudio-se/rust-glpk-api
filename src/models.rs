@@ -5,7 +5,12 @@ use glpk_rust::Bound;
 
 // ---------- API response types (decoupled from the lib) ----------
 
-#[derive(Serialize, Deserialize)]
+/// Solution status sent to clients.
+///
+/// All variants are kept for backwards compatibility with existing clients,
+/// but only `Optimal`, `Feasible` and `MIPFailed` are returned.
+/// See `domain::outcome` for the contract.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Status {
     Undefined = 1,
     Feasible = 2,
@@ -18,7 +23,7 @@ pub enum Status {
     EmptySpace = 9,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ApiSolution {
     pub status: Status,
     pub objective: i32,
